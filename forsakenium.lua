@@ -17,12 +17,6 @@ local Sources = {
 	Player = REPO .. "/Functions/player.lua",
 	Sprinting = REPO .. "/Functions/sprinting.lua",
 	Generators = REPO .. "/Functions/generators.lua",
-	Visuals = REPO .. "/Functions/visuals.lua",
-	Survivors = REPO .. "/Functions/survivors.lua",
-	Killers = REPO .. "/Functions/killers.lua",
-	Effects = REPO .. "/Functions/effects.lua",
-	Animations = REPO .. "/Functions/animations.lua",
-	Miscellaneous = REPO .. "/Functions/miscellaneous.lua",
 	Settings = REPO .. "/Functions/settings.lua",
 }
 
@@ -90,12 +84,6 @@ local TAB_DEFS = {
 	{ Id = "Player", Title = "Player", Icon = "user-round" },
 	{ Id = "Sprinting", Title = "Sprinting", Icon = "footprints" },
 	{ Id = "Generators", Title = "Generators", Icon = "cog" },
-	{ Id = "Visuals", Title = "Visuals", Icon = "eye" },
-	{ Id = "Survivors", Title = "Survivors", Icon = "users" },
-	{ Id = "Killers", Title = "Killers", Icon = "skull" },
-	{ Id = "Effects", Title = "Effects", Icon = "shield" },
-	{ Id = "Animations", Title = "Animations", Icon = "clapperboard" },
-	{ Id = "Miscellaneous", Title = "Miscellaneous", Icon = "cloudy" },
 	{ Id = "Settings", Title = "Settings", Icon = "settings" },
 }
 
