@@ -1,7 +1,9 @@
 --// Visuals tab.
 --//
---// Killer ESP is the only feature with logic. It uses a Roblox Highlight on each
---// killer character.
+--// Implemented features:
+--//   Killer ESP   - Roblox Highlight on each killer character
+--//   Show Killer Name   - BillboardGui name above the killer
+--//   Show Killer Health - BillboardGui health bar above the killer
 --//
 --// Roblox only renders one Highlight per model. Some rounds add their own Highlight
 --// to the killer (and remove it later); when theirs is removed ours can stop showing
@@ -18,9 +20,12 @@ local LocalPlayer = Players.LocalPlayer
 local KILLER_FOLDER = "Killers"
 local SCAN_INTERVAL = 0.25
 local HIGHLIGHT_NAME = "ForsakeniumKillerESP"
+local BILLBOARD_NAME = "ForsakeniumKillerInfo"
 
 local State = {
 	KillerESP = false,
+	ShowName = false,
+	ShowHealth = false,
 	Color = Color3.fromHex("ff3232"),
 	FillTransparency = 0.7,
 	OutlineTransparency = 0.3,
@@ -66,6 +71,10 @@ local function getKillerFolder()
 	return nil
 end
 
+local function isActive()
+	return State.KillerESP or State.ShowName or State.ShowHealth
+end
+
 local function style(highlight)
 	highlight.FillColor = State.Color
 	highlight.OutlineColor = State.Color
@@ -97,7 +106,7 @@ local function refresh(entry)
 	highlight.Enabled = false
 	highlight.Parent = nil
 	highlight.Parent = model
-	highlight.Enabled = true
+	highlight.Enabled = State.KillerESP
 end
 
 local function watch(entry)
@@ -127,6 +136,116 @@ local function unwatch(entry)
 	end
 end
 
+local function createBillboard(model)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = BILLBOARD_NAME
+	billboard.Adornee = model
+	billboard.Size = UDim2.fromOffset(180, 42)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.5, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 10000
+	billboard.ResetOnSpawn = false
+	billboard.LightInfluence = 0
+	billboard.Enabled = false
+	billboard.Parent = model
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Size = UDim2.fromScale(1, 0.5)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 14
+	nameLabel.TextColor3 = State.Color
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextStrokeTransparency = 0.3
+	nameLabel.Text = ""
+	nameLabel.Parent = billboard
+
+	local healthBack = Instance.new("Frame")
+	healthBack.Name = "HealthBack"
+	healthBack.Position = UDim2.fromScale(0.2, 0.56)
+	healthBack.Size = UDim2.fromScale(0.6, 0.16)
+	healthBack.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	healthBack.BackgroundTransparency = 0.4
+	healthBack.BorderSizePixel = 0
+	healthBack.Parent = billboard
+
+	local backCorner = Instance.new("UICorner")
+	backCorner.CornerRadius = UDim.new(1, 0)
+	backCorner.Parent = healthBack
+
+	local healthFill = Instance.new("Frame")
+	healthFill.Name = "HealthFill"
+	healthFill.Size = UDim2.fromScale(1, 1)
+	healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = healthBack
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = healthFill
+
+	return billboard, nameLabel, healthBack, healthFill
+end
+
+local function updateBillboard(entry)
+	local billboard = entry.billboard
+	if not billboard or not billboard.Parent then
+		return
+	end
+
+	if not (State.ShowName or State.ShowHealth) then
+		billboard.Enabled = false
+		return
+	end
+
+	local model = entry.model
+	local adornee = model:FindFirstChild("Head")
+		or model:FindFirstChild("HumanoidRootPart")
+		or model.PrimaryPart
+
+	if adornee and billboard.Adornee ~= adornee then
+		billboard.Adornee = adornee
+	end
+
+	billboard.Enabled = true
+
+	if entry.nameLabel then
+		entry.nameLabel.Visible = State.ShowName
+		entry.nameLabel.Text = model.Name
+		entry.nameLabel.TextColor3 = State.Color
+	end
+
+	if entry.healthBack then
+		entry.healthBack.Visible = State.ShowHealth
+
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid and entry.healthFill then
+			local ratio = humanoid.MaxHealth > 0
+				and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+				or 0
+			entry.healthFill.Size = UDim2.fromScale(ratio, 1)
+			entry.healthFill.BackgroundColor3 = ratio < 0.25
+				and Color3.fromRGB(235, 80, 80)
+				or Color3.fromRGB(80, 220, 100)
+		end
+	end
+end
+
+local function applyEntry(entry)
+	if entry.highlight and entry.highlight.Parent then
+		entry.highlight.Enabled = State.KillerESP
+		style(entry.highlight)
+	end
+	updateBillboard(entry)
+end
+
+local function applyAll()
+	for _, entry in pairs(tracked) do
+		applyEntry(entry)
+	end
+end
+
 local function createEntry(model)
 	local highlight = Instance.new("Highlight")
 	highlight.Name = HIGHLIGHT_NAME
@@ -134,13 +253,20 @@ local function createEntry(model)
 	highlight.Parent = model
 	style(highlight)
 
+	local billboard, nameLabel, healthBack, healthFill = createBillboard(model)
+
 	local entry = {
 		model = model,
 		highlight = highlight,
+		billboard = billboard,
+		nameLabel = nameLabel,
+		healthBack = healthBack,
+		healthFill = healthFill,
 		foreign = countForeignHighlights(model, highlight),
 	}
 
 	watch(entry)
+	applyEntry(entry)
 	return entry
 end
 
@@ -148,6 +274,9 @@ local function destroyEntry(entry)
 	unwatch(entry)
 	if entry.highlight then
 		entry.highlight:Destroy()
+	end
+	if entry.billboard then
+		entry.billboard:Destroy()
 	end
 end
 
@@ -169,10 +298,14 @@ local function scan()
 				seen[model] = true
 
 				local entry = tracked[model]
+				local broken = entry
+					and (not entry.highlight or not entry.highlight.Parent
+						or not entry.billboard or not entry.billboard.Parent)
+
 				if not entry then
 					tracked[model] = createEntry(model)
-				elseif not entry.highlight or not entry.highlight.Parent then
-					-- Our Highlight was destroyed along with the game's; rebuild it.
+				elseif broken then
+					-- Our instances were removed along with the game's; rebuild them.
 					destroyEntry(entry)
 					tracked[model] = createEntry(model)
 				end
@@ -188,17 +321,13 @@ local function scan()
 	end
 end
 
-local function restyleAll()
-	for _, entry in pairs(tracked) do
-		if entry.highlight then
-			style(entry.highlight)
-		end
-	end
-end
-
 table.insert(connections, RunService.Heartbeat:Connect(function(dt)
-	if not State.KillerESP then
+	if not isActive() then
 		return
+	end
+
+	for _, entry in pairs(tracked) do
+		pcall(updateBillboard, entry)
 	end
 
 	scanClock += dt
@@ -210,29 +339,44 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	pcall(scan)
 end))
 
-function Visuals:SetKillerESP(enabled)
-	State.KillerESP = enabled
-
+local function afterToggle(enabled)
 	if enabled then
 		scan()
-	else
+	end
+	applyAll()
+	if not isActive() then
 		clearAll()
 	end
 end
 
+function Visuals:SetKillerESP(enabled)
+	State.KillerESP = enabled
+	afterToggle(enabled)
+end
+
+function Visuals:SetShowName(enabled)
+	State.ShowName = enabled
+	afterToggle(enabled)
+end
+
+function Visuals:SetShowHealth(enabled)
+	State.ShowHealth = enabled
+	afterToggle(enabled)
+end
+
 function Visuals:SetColor(color)
 	State.Color = color
-	restyleAll()
+	applyAll()
 end
 
 function Visuals:SetFillTransparency(value)
 	State.FillTransparency = value
-	restyleAll()
+	applyAll()
 end
 
 function Visuals:SetOutlineTransparency(value)
 	State.OutlineTransparency = value
-	restyleAll()
+	applyAll()
 end
 
 function Visuals.Build(Tab, ctx)
@@ -251,12 +395,18 @@ function Visuals.Build(Tab, ctx)
 		Title = "Show Killer Name",
 		Desc = "Draw the killer's name above them.",
 		Value = false,
+		Callback = function(value)
+			Visuals:SetShowName(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Show Killer Health",
 		Desc = "Draw the killer's health bar.",
 		Value = false,
+		Callback = function(value)
+			Visuals:SetShowHealth(value)
+		end,
 	})
 
 	Tab:Slider({
@@ -407,6 +557,8 @@ end
 
 function Visuals.Unload()
 	State.KillerESP = false
+	State.ShowName = false
+	State.ShowHealth = false
 	clearAll()
 
 	for _, conn in ipairs(connections) do
