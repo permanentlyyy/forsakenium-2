@@ -40,7 +40,7 @@ function Visuals.Build(Tab, ctx)
 	Tab:Colorpicker({
 		Title = "Killer Color",
 		Desc = "Highlight color used for killers.",
-		Value = Color3.fromHex("ff3232"),
+		Default = Color3.fromHex("ff3232"),
 	})
 
 	Tab:Section({ Title = "Survivor", Icon = "users", TextSize = 15 })
@@ -80,7 +80,7 @@ function Visuals.Build(Tab, ctx)
 	Tab:Colorpicker({
 		Title = "Survivor Color",
 		Desc = "Highlight color used for survivors.",
-		Value = Color3.fromHex("32ff32"),
+		Default = Color3.fromHex("32ff32"),
 	})
 end
 
