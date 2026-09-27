@@ -1,9 +1,10 @@
---// Visuals tab: no logic implemented yet, so the tab is intentionally empty.
---// Add elements inside Build() once there is real logic to drive them.
+--// Visuals tab.
 
 local Visuals = {}
 
-function Visuals.Build(Tab, ctx) end
+function Visuals.Build(Tab, ctx)
+	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
+end
 
 function Visuals.Unload() end
 
