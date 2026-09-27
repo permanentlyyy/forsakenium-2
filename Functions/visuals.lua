@@ -120,6 +120,44 @@ function Visuals.Build(Tab, ctx)
 		Desc = "Highlight graffiti through walls.",
 		Value = false,
 	})
+
+	Tab:Section({ Title = "Tracers", Icon = "route", TextSize = 15 })
+
+	Tab:Toggle({
+		Title = "Killers",
+		Desc = "Draw tracers to killers.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Survivors",
+		Desc = "Draw tracers to survivors.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Generators",
+		Desc = "Draw tracers to generators.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Items",
+		Desc = "Draw tracers to items.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Tripwires",
+		Desc = "Draw tracers to tripwires.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Subspace Tripmines",
+		Desc = "Draw tracers to subspace tripmines.",
+		Value = false,
+	})
 end
 
 function Visuals.Unload() end
