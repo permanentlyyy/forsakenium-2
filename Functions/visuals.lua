@@ -212,7 +212,7 @@ local function updateBillboard(entry)
 		table.insert(parts, math.floor(humanoid.Health + 0.5) .. "/" .. math.floor(maxHealth + 0.5))
 	end
 
-	label.Text = table.concat(parts, "  |  ")
+	label.Text = table.concat(parts, " | ")
 	label.TextColor3 = ratio < 0.25
 		and Color3.fromRGB(255, 90, 90)
 		or Color3.fromRGB(255, 255, 255)
