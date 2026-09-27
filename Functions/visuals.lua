@@ -36,6 +36,7 @@ local connections = {}
 local scanClock = 0
 
 local killerFolder = nil
+local lastRecursiveSearch = 0
 
 -- The round containers are nested (e.g. workspace.Players.Killers), so resolve the
 -- folder dynamically and cache it until it disappears.
@@ -61,9 +62,13 @@ local function getKillerFolder()
 		end
 	end
 
-	for _, child in ipairs(workspace:GetDescendants()) do
-		if child.Name == KILLER_FOLDER and (child:IsA("Folder") or child:IsA("Model")) then
-			killerFolder = child
+	-- Recursive search is the expensive fallback, so throttle it.
+	local now = os.clock()
+	if now - lastRecursiveSearch >= 2 then
+		lastRecursiveSearch = now
+		local found = workspace:FindFirstChild(KILLER_FOLDER, true)
+		if found then
+			killerFolder = found
 			return killerFolder
 		end
 	end
