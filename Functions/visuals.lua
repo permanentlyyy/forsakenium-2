@@ -140,8 +140,8 @@ local function createBillboard(model)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = BILLBOARD_NAME
 	billboard.Adornee = model
-	billboard.Size = UDim2.fromOffset(180, 42)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.5, 0)
+	billboard.Size = UDim2.fromOffset(240, 20)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 10000
 	billboard.ResetOnSpawn = false
@@ -149,43 +149,21 @@ local function createBillboard(model)
 	billboard.Enabled = false
 	billboard.Parent = model
 
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Name = "Name"
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Size = UDim2.fromScale(1, 0.5)
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 14
-	nameLabel.TextColor3 = State.Color
-	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	nameLabel.TextStrokeTransparency = 0.3
-	nameLabel.Text = ""
-	nameLabel.Parent = billboard
+	local label = Instance.new("TextLabel")
+	label.Name = "Info"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.GothamMedium
+	label.TextSize = 16
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.5
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Text = ""
+	label.Parent = billboard
 
-	local healthBack = Instance.new("Frame")
-	healthBack.Name = "HealthBack"
-	healthBack.Position = UDim2.fromScale(0.2, 0.56)
-	healthBack.Size = UDim2.fromScale(0.6, 0.16)
-	healthBack.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	healthBack.BackgroundTransparency = 0.4
-	healthBack.BorderSizePixel = 0
-	healthBack.Parent = billboard
-
-	local backCorner = Instance.new("UICorner")
-	backCorner.CornerRadius = UDim.new(1, 0)
-	backCorner.Parent = healthBack
-
-	local healthFill = Instance.new("Frame")
-	healthFill.Name = "HealthFill"
-	healthFill.Size = UDim2.fromScale(1, 1)
-	healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
-	healthFill.BorderSizePixel = 0
-	healthFill.Parent = healthBack
-
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(1, 0)
-	fillCorner.Parent = healthFill
-
-	return billboard, nameLabel, healthBack, healthFill
+	return billboard, label
 end
 
 local function updateBillboard(entry)
@@ -210,26 +188,29 @@ local function updateBillboard(entry)
 
 	billboard.Enabled = true
 
-	if entry.nameLabel then
-		entry.nameLabel.Visible = State.ShowName
-		entry.nameLabel.Text = model.Name
-		entry.nameLabel.TextColor3 = State.Color
+	local label = entry.label
+	if not label then
+		return
 	end
 
-	if entry.healthBack then
-		entry.healthBack.Visible = State.ShowHealth
-
-		local humanoid = model:FindFirstChildOfClass("Humanoid")
-		if humanoid and entry.healthFill then
-			local ratio = humanoid.MaxHealth > 0
-				and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-				or 0
-			entry.healthFill.Size = UDim2.fromScale(ratio, 1)
-			entry.healthFill.BackgroundColor3 = ratio < 0.25
-				and Color3.fromRGB(235, 80, 80)
-				or Color3.fromRGB(80, 220, 100)
-		end
+	local parts = {}
+	if State.ShowName then
+		table.insert(parts, model.Name)
 	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local ratio = 1
+
+	if State.ShowHealth and humanoid then
+		local maxHealth = math.max(humanoid.MaxHealth, 1)
+		ratio = math.clamp(humanoid.Health / maxHealth, 0, 1)
+		table.insert(parts, math.floor(humanoid.Health + 0.5) .. "/" .. math.floor(maxHealth + 0.5))
+	end
+
+	label.Text = table.concat(parts, "  |  ")
+	label.TextColor3 = ratio < 0.25
+		and Color3.fromRGB(255, 90, 90)
+		or Color3.fromRGB(255, 255, 255)
 end
 
 local function applyEntry(entry)
@@ -253,15 +234,13 @@ local function createEntry(model)
 	highlight.Parent = model
 	style(highlight)
 
-	local billboard, nameLabel, healthBack, healthFill = createBillboard(model)
+	local billboard, label = createBillboard(model)
 
 	local entry = {
 		model = model,
 		highlight = highlight,
 		billboard = billboard,
-		nameLabel = nameLabel,
-		healthBack = healthBack,
-		healthFill = healthFill,
+		label = label,
 		foreign = countForeignHighlights(model, highlight),
 	}
 
