@@ -439,6 +439,185 @@ local SurvivorESP = makeESP({
 	color = Color3.fromHex("32ff32"),
 })
 
+-- Generator ESP. Real generators are models with a Progress NumberValue whose
+-- GeneratorProfile is not "Fake"; fakes must be skipped. Progress runs 0-100 and a
+-- generator is done once it reaches 100, at which point we stop highlighting it.
+local GeneratorESP = (function()
+	local state = {
+		Enabled = false,
+		Color = Color3.fromHex("ffcc33"),
+		FillTransparency = 0.7,
+		OutlineTransparency = 0.3,
+	}
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function getContainers()
+		local containers = {}
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return containers
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		local ingameMap = ingame and ingame:FindFirstChild("Map")
+		if ingameMap then
+			table.insert(containers, ingameMap)
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		local interactive = lobby and lobby:FindFirstChild("Interactive")
+		if interactive then
+			table.insert(containers, interactive)
+		end
+
+		return containers
+	end
+
+	local function isRealGenerator(model)
+		if not model:IsA("Model") then
+			return false
+		end
+		if model:GetAttribute("GeneratorProfile") == "Fake" then
+			return false
+		end
+		return model:FindFirstChild("Progress") ~= nil
+	end
+
+	local function isCompleted(model)
+		local progress = model:FindFirstChild("Progress")
+		return progress ~= nil and progress.Value >= 100
+	end
+
+	local function style(highlight)
+		highlight.FillColor = state.Color
+		highlight.OutlineColor = state.Color
+		highlight.FillTransparency = state.FillTransparency
+		highlight.OutlineTransparency = state.OutlineTransparency
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(model)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumGeneratorESP"
+		highlight.Adornee = model
+		highlight.Parent = model
+		style(highlight)
+		return { model = model, highlight = highlight }
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for model, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[model] = nil
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, container in ipairs(getContainers()) do
+			for _, model in ipairs(container:GetChildren()) do
+				if isRealGenerator(model) and not isCompleted(model) then
+					seen[model] = true
+
+					local entry = tracked[model]
+					local broken = entry and (not entry.highlight or not entry.highlight.Parent)
+
+					if not entry then
+						tracked[model] = createEntry(model)
+					elseif broken then
+						destroyEntry(entry)
+						tracked[model] = createEntry(model)
+					end
+				end
+			end
+		end
+
+		for model, entry in pairs(tracked) do
+			if not seen[model] then
+				destroyEntry(entry)
+				tracked[model] = nil
+			end
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = state.Enabled
+				and not isCompleted(entry.model)
+				and isWithinRange(entry.model)
+		end
+	end
+
+	local function applyAll()
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not state.Enabled then
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+		if enabled then
+			pcall(scan)
+		else
+			clearAll()
+		end
+		applyAll()
+	end
+
+	function api:SetColor(color)
+		state.Color = color
+		for _, entry in pairs(tracked) do
+			if entry.highlight then
+				style(entry.highlight)
+			end
+		end
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -560,8 +739,11 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Generator ESP",
-		Desc = "Highlight generators through walls.",
+		Desc = "Highlight real generators (skips fakes and completed ones).",
 		Value = false,
+		Callback = function(value)
+			GeneratorESP:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
@@ -636,6 +818,7 @@ end
 function Visuals.Unload()
 	KillerESP.Unload()
 	SurvivorESP.Unload()
+	GeneratorESP.Unload()
 end
 
 return Visuals
