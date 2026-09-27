@@ -30,8 +30,40 @@ local tracked = {}
 local connections = {}
 local scanClock = 0
 
+local killerFolder = nil
+
+-- The round containers are nested (e.g. workspace.Players.Killers), so resolve the
+-- folder dynamically and cache it until it disappears.
 local function getKillerFolder()
-	return workspace:FindFirstChild(KILLER_FOLDER)
+	if killerFolder and killerFolder.Parent then
+		return killerFolder
+	end
+
+	killerFolder = nil
+
+	local direct = workspace:FindFirstChild(KILLER_FOLDER)
+	if direct then
+		killerFolder = direct
+		return killerFolder
+	end
+
+	local players = workspace:FindFirstChild("Players")
+	if players then
+		local nested = players:FindFirstChild(KILLER_FOLDER)
+		if nested then
+			killerFolder = nested
+			return killerFolder
+		end
+	end
+
+	for _, child in ipairs(workspace:GetDescendants()) do
+		if child.Name == KILLER_FOLDER and (child:IsA("Folder") or child:IsA("Model")) then
+			killerFolder = child
+			return killerFolder
+		end
+	end
+
+	return nil
 end
 
 local function style(highlight)
