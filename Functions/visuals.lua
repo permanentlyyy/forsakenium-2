@@ -104,8 +104,8 @@ function Visuals.Build(Tab, ctx)
 	})
 
 	Tab:Toggle({
-		Title = "Mine ESP",
-		Desc = "Highlight mines through walls.",
+		Title = "Subspace Tripmine ESP",
+		Desc = "Highlight subspace tripmines through walls.",
 		Value = false,
 	})
 
