@@ -124,37 +124,37 @@ function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Tracers", Icon = "route", TextSize = 15 })
 
 	Tab:Toggle({
-		Title = "Killers",
-		Desc = "Draw tracers to killers.",
+		Title = "Killer Tracer",
+		Desc = "Draw a tracer to the killer.",
 		Value = false,
 	})
 
 	Tab:Toggle({
-		Title = "Survivors",
+		Title = "Survivor Tracer",
 		Desc = "Draw tracers to survivors.",
 		Value = false,
 	})
 
 	Tab:Toggle({
-		Title = "Generators",
+		Title = "Generator Tracer",
 		Desc = "Draw tracers to generators.",
 		Value = false,
 	})
 
 	Tab:Toggle({
-		Title = "Items",
+		Title = "Item Tracer",
 		Desc = "Draw tracers to items.",
 		Value = false,
 	})
 
 	Tab:Toggle({
-		Title = "Tripwires",
+		Title = "Tripwire Tracer",
 		Desc = "Draw tracers to tripwires.",
 		Value = false,
 	})
 
 	Tab:Toggle({
-		Title = "Subspace Tripmines",
+		Title = "Subspace Tripmine Tracer",
 		Desc = "Draw tracers to subspace tripmines.",
 		Value = false,
 	})
