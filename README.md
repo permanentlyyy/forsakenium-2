@@ -14,7 +14,7 @@ Functions/
   player.lua             Player        (character: god mode, invisibility, footsteps)
   sprinting.lua          Sprinting     (stamina: infinite stamina, legit view, always sprint)
   generators.lua         Generators    (auto solve, grid size, puzzle path)
-  visuals.lua            Visuals       (Killer + Survivor sections: toggles, sliders, color pickers - no logic yet)
+  visuals.lua            Visuals       (Killer + Survivor + Miscellaneous sections: ESP toggles, sliders, color pickers - no logic yet)
   survivors.lua          Survivors     (empty - no logic yet)
   killers.lua            Killers       (empty - no logic yet)
   effects.lua            Effects       (empty - no logic yet)

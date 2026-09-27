@@ -82,6 +82,44 @@ function Visuals.Build(Tab, ctx)
 		Desc = "Highlight color used for survivors.",
 		Default = Color3.fromHex("32ff32"),
 	})
+
+	Tab:Section({ Title = "Miscellaneous", Icon = "box", TextSize = 15 })
+
+	Tab:Toggle({
+		Title = "Generator ESP",
+		Desc = "Highlight generators through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Item ESP",
+		Desc = "Highlight items through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Tripwire ESP",
+		Desc = "Highlight tripwires through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Mine ESP",
+		Desc = "Highlight mines through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Ritual ESP",
+		Desc = "Highlight ritual objects through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Graffiti ESP",
+		Desc = "Highlight graffiti through walls.",
+		Value = false,
+	})
 end
 
 function Visuals.Unload() end
