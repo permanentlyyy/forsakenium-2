@@ -42,6 +42,46 @@ function Visuals.Build(Tab, ctx)
 		Desc = "Highlight color used for killers.",
 		Value = Color3.fromHex("ff3232"),
 	})
+
+	Tab:Section({ Title = "Survivor", Icon = "users", TextSize = 15 })
+
+	Tab:Toggle({
+		Title = "Survivor ESP",
+		Desc = "Highlight survivors through walls.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Show Survivor Name",
+		Desc = "Draw the survivor's name above them.",
+		Value = false,
+	})
+
+	Tab:Toggle({
+		Title = "Show Survivor Health",
+		Desc = "Draw the survivor's health bar.",
+		Value = false,
+	})
+
+	Tab:Slider({
+		Title = "Fill Transparency",
+		Desc = "Transparency of the survivor highlight fill.",
+		Value = { Default = 0.7, Min = 0, Max = 1 },
+		Step = 0.01,
+	})
+
+	Tab:Slider({
+		Title = "Outline Transparency",
+		Desc = "Transparency of the survivor highlight outline.",
+		Value = { Default = 0.3, Min = 0, Max = 1 },
+		Step = 0.01,
+	})
+
+	Tab:Colorpicker({
+		Title = "Survivor Color",
+		Desc = "Highlight color used for survivors.",
+		Value = Color3.fromHex("32ff32"),
+	})
 end
 
 function Visuals.Unload() end
