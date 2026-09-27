@@ -189,7 +189,7 @@ local function createBillboard(model)
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
 	label.Font = Enum.Font.GothamMedium
-	label.TextSize = 16
+	label.TextSize = 13
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	label.TextStrokeTransparency = 0.5
@@ -203,6 +203,8 @@ end
 
 local function updateBillboard(entry)
 	local billboard = entry.billboard
+	local model = entry.model
+
 	if not billboard or not billboard.Parent then
 		return
 	end
@@ -212,13 +214,22 @@ local function updateBillboard(entry)
 		return
 	end
 
-	local model = entry.model
+	-- Defensive: the billboard must be parented to the killer and have a valid
+	-- adornee, otherwise it silently renders nothing.
+	if billboard.Parent ~= model then
+		billboard.Parent = model
+	end
+
 	local adornee = model:FindFirstChild("Head")
 		or model:FindFirstChild("HumanoidRootPart")
 		or model.PrimaryPart
 
-	if adornee and billboard.Adornee ~= adornee then
-		billboard.Adornee = adornee
+	if adornee then
+		if billboard.Adornee ~= adornee then
+			billboard.Adornee = adornee
+		end
+	elseif not billboard.Adornee then
+		billboard.Adornee = model
 	end
 
 	billboard.Enabled = true
@@ -233,19 +244,16 @@ local function updateBillboard(entry)
 		table.insert(parts, model.Name)
 	end
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local ratio = 1
-
-	if State.ShowHealth and humanoid then
-		local maxHealth = math.max(humanoid.MaxHealth, 1)
-		ratio = math.clamp(humanoid.Health / maxHealth, 0, 1)
-		table.insert(parts, math.floor(humanoid.Health + 0.5) .. "/" .. math.floor(maxHealth + 0.5))
+	if State.ShowHealth then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local maxHealth = math.max(humanoid.MaxHealth, 1)
+			table.insert(parts, math.floor(humanoid.Health + 0.5) .. "/" .. math.floor(maxHealth + 0.5))
+		end
 	end
 
 	label.Text = table.concat(parts, " | ")
-	label.TextColor3 = ratio < 0.25
-		and Color3.fromRGB(255, 90, 90)
-		or Color3.fromRGB(255, 255, 255)
+	label.TextColor3 = State.Color
 end
 
 local function updateEntry(entry)
@@ -361,9 +369,9 @@ end))
 
 local function afterToggle(enabled)
 	if enabled then
-		scan()
+		pcall(scan)
 	end
-	applyAll()
+	pcall(applyAll)
 	if not isActive() then
 		clearAll()
 	end
