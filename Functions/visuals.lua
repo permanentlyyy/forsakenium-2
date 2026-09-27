@@ -22,6 +22,9 @@ local SCAN_INTERVAL = 0.25
 local HIGHLIGHT_NAME = "ForsakeniumKillerESP"
 local BILLBOARD_NAME = "ForsakeniumKillerInfo"
 
+-- Nothing is drawn past this distance (studs). Shared by every ESP in this module.
+local MAX_DISTANCE = 1000
+
 local State = {
 	KillerESP = false,
 	ShowName = false,
@@ -80,6 +83,33 @@ local function isActive()
 	return State.KillerESP or State.ShowName or State.ShowHealth
 end
 
+local function getReferencePosition()
+	local character = LocalPlayer.Character
+	local root = character
+		and (character.PrimaryPart or character:FindFirstChild("HumanoidRootPart"))
+
+	if root then
+		return root.Position
+	end
+
+	local camera = workspace.CurrentCamera
+	return camera and camera.CFrame.Position or nil
+end
+
+local function isWithinRange(model)
+	local reference = getReferencePosition()
+	if not reference then
+		return true
+	end
+
+	local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return true
+	end
+
+	return (root.Position - reference).Magnitude <= MAX_DISTANCE
+end
+
 local function style(highlight)
 	highlight.FillColor = State.Color
 	highlight.OutlineColor = State.Color
@@ -111,7 +141,7 @@ local function refresh(entry)
 	highlight.Enabled = false
 	highlight.Parent = nil
 	highlight.Parent = model
-	highlight.Enabled = State.KillerESP
+	highlight.Enabled = State.KillerESP and isWithinRange(model)
 end
 
 local function watch(entry)
@@ -148,7 +178,7 @@ local function createBillboard(model)
 	billboard.Size = UDim2.fromOffset(240, 20)
 	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
 	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 10000
+	billboard.MaxDistance = MAX_DISTANCE
 	billboard.ResetOnSpawn = false
 	billboard.LightInfluence = 0
 	billboard.Enabled = false
@@ -218,12 +248,18 @@ local function updateBillboard(entry)
 		or Color3.fromRGB(255, 255, 255)
 end
 
-local function applyEntry(entry)
+local function updateEntry(entry)
 	if entry.highlight and entry.highlight.Parent then
-		entry.highlight.Enabled = State.KillerESP
-		style(entry.highlight)
+		entry.highlight.Enabled = State.KillerESP and isWithinRange(entry.model)
 	end
 	updateBillboard(entry)
+end
+
+local function applyEntry(entry)
+	if entry.highlight and entry.highlight.Parent then
+		style(entry.highlight)
+	end
+	updateEntry(entry)
 end
 
 local function applyAll()
@@ -311,7 +347,7 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	end
 
 	for _, entry in pairs(tracked) do
-		pcall(updateBillboard, entry)
+		pcall(updateEntry, entry)
 	end
 
 	scanClock += dt
