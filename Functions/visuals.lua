@@ -77,18 +77,25 @@ local function getReferencePosition()
 	return camera and camera.CFrame.Position or nil
 end
 
-local function isWithinRange(model)
+local function isWithinRange(target)
 	local reference = getReferencePosition()
 	if not reference then
 		return true
 	end
 
-	local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	if not root then
+	local position
+	if target:IsA("BasePart") then
+		position = target.Position
+	else
+		local root = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart")
+		position = root and root.Position
+	end
+
+	if not position then
 		return true
 	end
 
-	return (root.Position - reference).Magnitude <= MAX_DISTANCE
+	return (position - reference).Magnitude <= MAX_DISTANCE
 end
 
 local function makeESP(opts)
@@ -618,6 +625,221 @@ local GeneratorESP = (function()
 	return api
 end)()
 
+-- Item ESP. World items are Tool instances with an ItemRoot BasePart, so the Highlight
+-- and the label adornee that part. Colour is picked from the item's name: medkits are
+-- white, colas are brown, everything else gets a neutral default. The label shows the
+-- item name in the same colour as the highlight.
+local ItemESP = (function()
+	local state = {
+		Enabled = false,
+		FillTransparency = 0.7,
+		OutlineTransparency = 0.3,
+	}
+
+	local MEDKIT_COLOR = Color3.fromRGB(255, 255, 255)
+	local COLA_COLOR = Color3.fromRGB(139, 69, 19)
+	local DEFAULT_COLOR = Color3.fromRGB(120, 200, 255)
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function colorFor(name)
+		local lower = string.lower(name)
+		if string.find(lower, "medkit", 1, true) then
+			return MEDKIT_COLOR
+		end
+		if string.find(lower, "cola", 1, true) then
+			return COLA_COLOR
+		end
+		return DEFAULT_COLOR
+	end
+
+	local function getContainers()
+		local containers = {}
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return containers
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		local ingameMap = ingame and ingame:FindFirstChild("Map")
+		if ingameMap then
+			table.insert(containers, ingameMap)
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		local interactive = lobby and lobby:FindFirstChild("Interactive")
+		if interactive then
+			table.insert(containers, interactive)
+		end
+
+		return containers
+	end
+
+	local function createEntry(tool, part)
+		local color = colorFor(tool.Name)
+
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumItemESP"
+		highlight.Adornee = part
+		highlight.FillColor = color
+		highlight.OutlineColor = color
+		highlight.FillTransparency = state.FillTransparency
+		highlight.OutlineTransparency = state.OutlineTransparency
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		highlight.Parent = part
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "ForsakeniumItemInfo"
+		billboard.Adornee = part
+		billboard.Size = UDim2.fromOffset(180, 18)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, 1.5, 0)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = MAX_DISTANCE
+		billboard.ResetOnSpawn = false
+		billboard.LightInfluence = 0
+		billboard.Enabled = false
+		billboard.Parent = part
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Info"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamMedium
+		label.TextSize = 13
+		label.TextColor3 = color
+		label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+		label.TextStrokeTransparency = 0.5
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextYAlignment = Enum.TextYAlignment.Center
+		label.Text = tool.Name
+		label.Parent = billboard
+
+		return {
+			tool = tool,
+			part = part,
+			highlight = highlight,
+			billboard = billboard,
+			label = label,
+		}
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+		if entry.billboard then
+			entry.billboard:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for tool, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[tool] = nil
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, container in ipairs(getContainers()) do
+			for _, tool in ipairs(container:GetChildren()) do
+				if tool:IsA("Tool") then
+					local part = tool:FindFirstChildOfClass("BasePart")
+					if part then
+						seen[tool] = true
+
+						local entry = tracked[tool]
+						local broken = entry
+							and (entry.part ~= part or not entry.highlight or not entry.highlight.Parent
+								or not entry.billboard or not entry.billboard.Parent)
+
+						if not entry or broken then
+							if entry then
+								destroyEntry(entry)
+							end
+							tracked[tool] = createEntry(tool, part)
+						end
+					end
+				end
+			end
+		end
+
+		for tool, entry in pairs(tracked) do
+			if not seen[tool] then
+				destroyEntry(entry)
+				tracked[tool] = nil
+			end
+		end
+	end
+
+	local function updateEntry(entry)
+		local within = state.Enabled and isWithinRange(entry.part)
+
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = within
+		end
+		if entry.billboard and entry.billboard.Parent then
+			entry.billboard.Enabled = state.Enabled
+		end
+		if entry.label then
+			entry.label.Text = entry.tool.Name
+		end
+	end
+
+	local function applyAll()
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not state.Enabled then
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+		if enabled then
+			pcall(scan)
+		else
+			clearAll()
+		end
+		applyAll()
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -748,8 +970,11 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Item ESP",
-		Desc = "Highlight items through walls.",
+		Desc = "Highlight world items (medkits white, colas brown).",
 		Value = false,
+		Callback = function(value)
+			ItemESP:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
@@ -819,6 +1044,7 @@ function Visuals.Unload()
 	KillerESP.Unload()
 	SurvivorESP.Unload()
 	GeneratorESP.Unload()
+	ItemESP.Unload()
 end
 
 return Visuals
