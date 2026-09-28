@@ -637,7 +637,7 @@ local ItemESP = (function()
 	}
 
 	local MEDKIT_COLOR = Color3.fromRGB(255, 255, 255)
-	local COLA_COLOR = Color3.fromRGB(139, 69, 19)
+	local COLA_COLOR = Color3.fromRGB(205, 133, 63)
 	local DEFAULT_COLOR = Color3.fromRGB(120, 200, 255)
 
 	local tracked = {}
@@ -677,35 +677,107 @@ local ItemESP = (function()
 		return containers
 	end
 
-	local function getItemPart(tool)
-		-- FindFirstChildOfClass("BasePart") does not match MeshPart in this client, so
-		-- scan the children directly.
-		for _, child in ipairs(tool:GetChildren()) do
-			if child:IsA("BasePart") then
-				return child
+	-- A Tool held or equipped by a player ends up under their character; skip those.
+	local function isHeldByCharacter(tool)
+		local node = tool.Parent
+		while node and node ~= workspace do
+			if node:IsA("Model") and node:FindFirstChildOfClass("Humanoid") then
+				return true
 			end
+			node = node.Parent
 		end
-		return nil
+		return false
 	end
 
-	local function createEntry(tool, part)
-		local color = colorFor(tool.Name)
+	-- Items can sit anywhere (map spawns, dropped on the ground), so query every Tool
+	-- in the workspace rather than only fixed containers.
+	local function collectTools()
+		local tools = {}
 
-		local highlight = Instance.new("Highlight")
-		highlight.Name = "ForsakeniumItemESP"
-		highlight.Adornee = part
+		if type(workspace.QueryDescendants) == "function" then
+			local ok, found = pcall(function()
+				return workspace:QueryDescendants("Tool")
+			end)
+			if ok and found then
+				for _, tool in ipairs(found) do
+					table.insert(tools, tool)
+				end
+				return tools
+			end
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return tools
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		local ingameMap = ingame and ingame:FindFirstChild("Map")
+		if ingameMap then
+			for _, child in ipairs(ingameMap:GetChildren()) do
+				if child:IsA("Tool") then
+					table.insert(tools, child)
+				end
+			end
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		local interactive = lobby and lobby:FindFirstChild("Interactive")
+		if interactive then
+			for _, child in ipairs(interactive:GetChildren()) do
+				if child:IsA("Tool") then
+					table.insert(tools, child)
+				end
+			end
+		end
+
+		return tools
+	end
+
+	-- Item visuals span several MeshParts (ItemRoot plus ItemRoot/Parts); a Highlight
+	-- only covers one BasePart, so every part needs its own.
+	local function collectParts(tool)
+		local parts = {}
+		for _, descendant in ipairs(tool:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				table.insert(parts, descendant)
+			end
+		end
+		return parts
+	end
+
+	local function primaryPart(parts)
+		for _, part in ipairs(parts) do
+			if part.Name == "ItemRoot" then
+				return part
+			end
+		end
+		return parts[1]
+	end
+
+	local function styleHighlight(highlight, color)
 		highlight.FillColor = color
 		highlight.OutlineColor = color
 		highlight.FillTransparency = state.FillTransparency
 		highlight.OutlineTransparency = state.OutlineTransparency
 		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-		highlight.Parent = part
+	end
 
+	local function createHighlight(part, color)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumItemESP"
+		highlight.Adornee = part
+		highlight.Parent = part
+		styleHighlight(highlight, color)
+		return highlight
+	end
+
+	local function createBillboard(part, name, color)
 		local billboard = Instance.new("BillboardGui")
 		billboard.Name = "ForsakeniumItemInfo"
 		billboard.Adornee = part
 		billboard.Size = UDim2.fromOffset(180, 18)
-		billboard.StudsOffsetWorldSpace = Vector3.new(0, 1.5, 0)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, 1.6, 0)
 		billboard.AlwaysOnTop = true
 		billboard.MaxDistance = MAX_DISTANCE
 		billboard.ResetOnSpawn = false
@@ -724,22 +796,43 @@ local ItemESP = (function()
 		label.TextStrokeTransparency = 0.5
 		label.TextXAlignment = Enum.TextXAlignment.Center
 		label.TextYAlignment = Enum.TextYAlignment.Center
-		label.Text = tool.Name
+		label.Text = name
 		label.Parent = billboard
+
+		return billboard, label
+	end
+
+	local function createEntry(tool)
+		local color = colorFor(tool.Name)
+		local parts = collectParts(tool)
+		local primary = primaryPart(parts)
+		if not primary then
+			return nil
+		end
+
+		local highlights = {}
+		for _, part in ipairs(parts) do
+			highlights[part] = createHighlight(part, color)
+		end
+
+		local billboard, label = createBillboard(primary, tool.Name, color)
 
 		return {
 			tool = tool,
-			part = part,
-			highlight = highlight,
+			color = color,
+			highlights = highlights,
+			primary = primary,
 			billboard = billboard,
 			label = label,
 		}
 	end
 
 	local function destroyEntry(entry)
-		if entry.highlight then
-			entry.highlight:Destroy()
+		for _, highlight in pairs(entry.highlights) do
+			highlight:Destroy()
 		end
+		table.clear(entry.highlights)
+
 		if entry.billboard then
 			entry.billboard:Destroy()
 		end
@@ -752,28 +845,50 @@ local ItemESP = (function()
 		end
 	end
 
+	-- Parts stream in and out, so keep the highlight set in sync on every scan.
+	local function syncParts(entry)
+		local parts = collectParts(entry.tool)
+		local current = {}
+
+		for _, part in ipairs(parts) do
+			current[part] = true
+			if not entry.highlights[part] then
+				entry.highlights[part] = createHighlight(part, entry.color)
+			end
+		end
+
+		for part, highlight in pairs(entry.highlights) do
+			if not current[part] then
+				highlight:Destroy()
+				entry.highlights[part] = nil
+			end
+		end
+
+		if not entry.billboard or not entry.billboard.Parent then
+			local primary = primaryPart(parts)
+			if primary then
+				entry.primary = primary
+				entry.billboard, entry.label = createBillboard(primary, entry.tool.Name, entry.color)
+			end
+		end
+	end
+
 	local function scan()
 		local seen = {}
 
-		for _, container in ipairs(getContainers()) do
-			for _, tool in ipairs(container:GetChildren()) do
-				if tool:IsA("Tool") then
-					local part = getItemPart(tool)
-					if part then
+		for _, tool in ipairs(collectTools()) do
+			if not isHeldByCharacter(tool) then
+				local entry = tracked[tool]
+
+				if not entry then
+					entry = createEntry(tool)
+					if entry then
+						tracked[tool] = entry
 						seen[tool] = true
-
-						local entry = tracked[tool]
-						local broken = entry
-							and (entry.part ~= part or not entry.highlight or not entry.highlight.Parent
-								or not entry.billboard or not entry.billboard.Parent)
-
-						if not entry or broken then
-							if entry then
-								destroyEntry(entry)
-							end
-							tracked[tool] = createEntry(tool, part)
-						end
 					end
+				else
+					seen[tool] = true
+					syncParts(entry)
 				end
 			end
 		end
@@ -787,11 +902,14 @@ local ItemESP = (function()
 	end
 
 	local function updateEntry(entry)
-		local within = state.Enabled and isWithinRange(entry.part)
+		local within = state.Enabled and entry.primary ~= nil and isWithinRange(entry.primary)
 
-		if entry.highlight and entry.highlight.Parent then
-			entry.highlight.Enabled = within
+		for _, highlight in pairs(entry.highlights) do
+			if highlight.Parent then
+				highlight.Enabled = within
+			end
 		end
+
 		if entry.billboard and entry.billboard.Parent then
 			entry.billboard.Enabled = state.Enabled
 		end
