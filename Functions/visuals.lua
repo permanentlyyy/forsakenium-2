@@ -1413,7 +1413,7 @@ local GraffitiESP = (function()
 	return api
 end)()
 
--- John Doe shadows. While Killer ESP is on and the local player is playing John Doe, any
+-- John Doe shadows. While Killer ESP is on and the killer in the round is John Doe, any
 -- "Shadow" part gets a highlight and is forced fully opaque so it can always be seen.
 -- No separate toggle: it follows Killer ESP plus the John Doe check automatically.
 local JohnDoeShadowESP = (function()
@@ -1423,14 +1423,22 @@ local JohnDoeShadowESP = (function()
 	local connections = {}
 	local scanClock = 0
 
-	local function isLocalJohnDoe()
-		local character = LocalPlayer.Character
-		if not character then
+	-- True while any killer character in the round is John Doe (you or someone else).
+	local function isJohnDoeKiller()
+		local players = workspace:FindFirstChild("Players")
+		local killers = players and players:FindFirstChild("Killers")
+		if not killers then
 			return false
 		end
 
-		local name = string.lower(character.Name):gsub("%s", "")
-		return string.find(name, "johndoe", 1, true) ~= nil
+		for _, character in ipairs(killers:GetChildren()) do
+			local name = string.lower(character.Name):gsub("%s", "")
+			if string.find(name, "johndoe", 1, true) then
+				return true
+			end
+		end
+
+		return false
 	end
 
 	local function collectShadowParts()
@@ -1461,11 +1469,6 @@ local JohnDoeShadowESP = (function()
 		local ingame = map:FindFirstChild("Ingame")
 		if ingame then
 			fromContainer(ingame)
-		end
-
-		local lobby = map:FindFirstChild("Lobby")
-		if lobby then
-			fromContainer(lobby)
 		end
 
 		return parts
@@ -1549,7 +1552,7 @@ local JohnDoeShadowESP = (function()
 	end
 
 	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
-		if not (KillerESP:IsEnabled() and isLocalJohnDoe()) then
+		if not (KillerESP:IsEnabled() and isJohnDoeKiller()) then
 			if next(tracked) ~= nil then
 				clearAll()
 			end
