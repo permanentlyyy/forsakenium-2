@@ -968,19 +968,8 @@ local ItemESP = (function()
 	return api
 end)()
 
--- Tripwire / subspace tripmine ESP. Survivors place these traps, so both only ever show
--- while the local player is the killer. The check runs before anything is highlighted and
--- again every frame, so highlights drop immediately if the player is not the killer.
-local function isLocalPlayerKiller()
-	local character = LocalPlayer.Character
-	if not character then
-		return false
-	end
-
-	local players = workspace:FindFirstChild("Players")
-	local killers = players and players:FindFirstChild("Killers")
-	return killers ~= nil and character:IsDescendantOf(killers)
-end
+-- Tripwire / subspace tripmine ESP. Survivors place these traps, and both killers and
+-- survivors can see them, so the toggles work for either team.
 
 -- A trap carried inside a character is not a placed trap, so leave it alone.
 local function isCarriedByCharacter(instance)
@@ -1108,14 +1097,6 @@ local function makeTrapESP(opts)
 			return
 		end
 
-		-- Gate first: anything other than the local killer means no highlights at all.
-		if not isLocalPlayerKiller() then
-			if next(tracked) ~= nil then
-				clearAll()
-			end
-			return
-		end
-
 		for _, entry in pairs(tracked) do
 			pcall(updateEntry, entry)
 		end
@@ -1134,7 +1115,7 @@ local function makeTrapESP(opts)
 	function api:SetEnabled(enabled)
 		state.Enabled = enabled
 
-		if enabled and isLocalPlayerKiller() then
+		if enabled then
 			pcall(scan)
 		else
 			clearAll()
@@ -1315,7 +1296,7 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Tripwire ESP",
-		Desc = "Highlight tripwires through walls (killer only).",
+		Desc = "Highlight tripwires through walls.",
 		Value = false,
 		Callback = function(value)
 			TripwireESP:SetEnabled(value)
@@ -1324,7 +1305,7 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Subspace Tripmine ESP",
-		Desc = "Highlight subspace tripmines through walls (killer only).",
+		Desc = "Highlight subspace tripmines through walls.",
 		Value = false,
 		Callback = function(value)
 			TripmineESP:SetEnabled(value)
