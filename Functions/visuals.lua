@@ -1157,6 +1157,228 @@ local TripmineESP = makeTrapESP({
 	end,
 })
 
+-- Graffiti ESP. Survivors spray graffiti onto walls; the game names every placed one
+-- "GraffitiCL" (a single BasePart whose ImageBeam holds the artwork). It gets a pink
+-- highlight plus a label above it showing the part name.
+local GraffitiESP = (function()
+	local state = {
+		Enabled = false,
+		Color = Color3.fromRGB(255, 105, 180),
+		FillTransparency = 0.7,
+		OutlineTransparency = 0.3,
+	}
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function getContainers()
+		local containers = {}
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return containers
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		if ingame then
+			table.insert(containers, ingame)
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		if lobby then
+			table.insert(containers, lobby)
+			local interactive = lobby:FindFirstChild("Interactive")
+			if interactive then
+				table.insert(containers, interactive)
+			end
+		end
+
+		return containers
+	end
+
+	local function isGraffiti(instance)
+		return instance:IsA("BasePart")
+			and string.find(string.lower(instance.Name), "graffiti", 1, true) ~= nil
+	end
+
+	-- Distance from the graffiti's centre up to just above its top, allowing for rotation.
+	local function labelOffset(part)
+		local cframe = part.CFrame
+		local half = 0.5 * (
+			math.abs(cframe.RightVector.Y) * part.Size.X
+			+ math.abs(cframe.UpVector.Y) * part.Size.Y
+			+ math.abs(cframe.LookVector.Y) * part.Size.Z
+		)
+		return half + 1.2
+	end
+
+	local function style(highlight)
+		highlight.FillColor = state.Color
+		highlight.OutlineColor = state.Color
+		highlight.FillTransparency = state.FillTransparency
+		highlight.OutlineTransparency = state.OutlineTransparency
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createBillboard(part)
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "ForsakeniumGraffitiInfo"
+		billboard.Adornee = part
+		billboard.Size = UDim2.fromOffset(200, 18)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, labelOffset(part), 0)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = MAX_DISTANCE
+		billboard.ResetOnSpawn = false
+		billboard.LightInfluence = 0
+		billboard.Enabled = false
+		billboard.Parent = part
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Info"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamMedium
+		label.TextSize = 13
+		label.TextColor3 = state.Color
+		label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+		label.TextStrokeTransparency = 0.5
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextYAlignment = Enum.TextYAlignment.Center
+		label.Text = part.Name
+		label.Parent = billboard
+
+		return billboard, label
+	end
+
+	local function createEntry(part)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumGraffitiESP"
+		highlight.Adornee = part
+		highlight.Parent = part
+		style(highlight)
+
+		local billboard, label = createBillboard(part)
+
+		return {
+			part = part,
+			highlight = highlight,
+			billboard = billboard,
+			label = label,
+		}
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+		if entry.billboard then
+			entry.billboard:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for part, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[part] = nil
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, container in ipairs(getContainers()) do
+			for _, instance in ipairs(container:GetChildren()) do
+				if isGraffiti(instance) then
+					seen[instance] = true
+
+					local entry = tracked[instance]
+					local broken = entry
+						and (not entry.highlight or not entry.highlight.Parent
+							or not entry.billboard or not entry.billboard.Parent)
+
+					if not entry or broken then
+						if entry then
+							destroyEntry(entry)
+						end
+						tracked[instance] = createEntry(instance)
+					end
+				end
+			end
+		end
+
+		for part, entry in pairs(tracked) do
+			if not seen[part] then
+				destroyEntry(entry)
+				tracked[part] = nil
+			end
+		end
+	end
+
+	local function updateEntry(entry)
+		local within = state.Enabled and isWithinRange(entry.part)
+
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = within
+		end
+		if entry.billboard and entry.billboard.Parent then
+			entry.billboard.Enabled = state.Enabled
+		end
+		if entry.label then
+			entry.label.Text = entry.part.Name
+		end
+	end
+
+	local function applyAll()
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not state.Enabled then
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+		if enabled then
+			pcall(scan)
+		else
+			clearAll()
+		end
+		applyAll()
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -1314,8 +1536,11 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Graffiti ESP",
-		Desc = "Highlight graffiti through walls.",
+		Desc = "Highlight graffiti through walls with the graffiti's name.",
 		Value = false,
+		Callback = function(value)
+			GraffitiESP:SetEnabled(value)
+		end,
 	})
 
 	Tab:Section({ Title = "Tracers", Icon = "route", TextSize = 15 })
@@ -1364,6 +1589,7 @@ function Visuals.Unload()
 	ItemESP.Unload()
 	TripwireESP.Unload()
 	TripmineESP.Unload()
+	GraffitiESP.Unload()
 end
 
 return Visuals
