@@ -677,6 +677,17 @@ local ItemESP = (function()
 		return containers
 	end
 
+	local function getItemPart(tool)
+		-- FindFirstChildOfClass("BasePart") does not match MeshPart in this client, so
+		-- scan the children directly.
+		for _, child in ipairs(tool:GetChildren()) do
+			if child:IsA("BasePart") then
+				return child
+			end
+		end
+		return nil
+	end
+
 	local function createEntry(tool, part)
 		local color = colorFor(tool.Name)
 
@@ -747,7 +758,7 @@ local ItemESP = (function()
 		for _, container in ipairs(getContainers()) do
 			for _, tool in ipairs(container:GetChildren()) do
 				if tool:IsA("Tool") then
-					local part = tool:FindFirstChildOfClass("BasePart")
+					local part = getItemPart(tool)
 					if part then
 						seen[tool] = true
 
