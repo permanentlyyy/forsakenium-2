@@ -625,10 +625,10 @@ local GeneratorESP = (function()
 	return api
 end)()
 
--- Item ESP. World items are Tool instances with an ItemRoot BasePart, so the Highlight
--- and the label adornee that part. Colour is picked from the item's name: medkits are
--- white, colas are brown, everything else gets a neutral default. The label shows the
--- item name in the same colour as the highlight.
+-- Item ESP. World items are Tool instances. A Highlight adorning the Tool covers all of
+-- its parts, so each item only needs one. Colour is picked from the item's name: medkits
+-- are white, colas a light brown, everything else a neutral default. The label sits above
+-- the item and shows its name in the same colour as the highlight.
 local ItemESP = (function()
 	local state = {
 		Enabled = false,
@@ -653,28 +653,6 @@ local ItemESP = (function()
 			return COLA_COLOR
 		end
 		return DEFAULT_COLOR
-	end
-
-	local function getContainers()
-		local containers = {}
-		local map = workspace:FindFirstChild("Map")
-		if not map then
-			return containers
-		end
-
-		local ingame = map:FindFirstChild("Ingame")
-		local ingameMap = ingame and ingame:FindFirstChild("Map")
-		if ingameMap then
-			table.insert(containers, ingameMap)
-		end
-
-		local lobby = map:FindFirstChild("Lobby")
-		local interactive = lobby and lobby:FindFirstChild("Interactive")
-		if interactive then
-			table.insert(containers, interactive)
-		end
-
-		return containers
 	end
 
 	-- A Tool held or equipped by a player ends up under their character; skip those.
@@ -734,8 +712,7 @@ local ItemESP = (function()
 		return tools
 	end
 
-	-- Item visuals span several MeshParts (ItemRoot plus ItemRoot/Parts); a Highlight
-	-- only covers one BasePart, so every part needs its own.
+	-- Every BasePart in the item, used to size the label and pick an anchor part.
 	local function collectParts(tool)
 		local parts = {}
 		for _, descendant in ipairs(tool:GetDescendants()) do
@@ -763,21 +740,45 @@ local ItemESP = (function()
 		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	end
 
-	local function createHighlight(part, color)
+	-- Adorning the Tool itself covers every part, so one Highlight per item is enough.
+	local function createHighlight(item, color)
 		local highlight = Instance.new("Highlight")
 		highlight.Name = "ForsakeniumItemESP"
-		highlight.Adornee = part
-		highlight.Parent = part
+		highlight.Adornee = item
+		highlight.Parent = item
 		styleHighlight(highlight, color)
 		return highlight
 	end
 
-	local function createBillboard(part, name, color)
+	-- Vertical distance from the anchor part up to the top of the item, so the label
+	-- always clears the model instead of landing inside or below it.
+	local function topOffset(parts, anchor)
+		local top = -math.huge
+		for _, part in ipairs(parts) do
+			local cframe = part.CFrame
+			local half = 0.5 * (
+				math.abs(cframe.RightVector.Y) * part.Size.X
+				+ math.abs(cframe.UpVector.Y) * part.Size.Y
+				+ math.abs(cframe.LookVector.Y) * part.Size.Z
+			)
+			local y = part.Position.Y + half
+			if y > top then
+				top = y
+			end
+		end
+
+		if top == -math.huge then
+			return 1.5
+		end
+		return top - anchor.Position.Y + 1.2
+	end
+
+	local function createBillboard(part, name, color, offset)
 		local billboard = Instance.new("BillboardGui")
 		billboard.Name = "ForsakeniumItemInfo"
 		billboard.Adornee = part
 		billboard.Size = UDim2.fromOffset(180, 18)
-		billboard.StudsOffsetWorldSpace = Vector3.new(0, 1.6, 0)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
 		billboard.AlwaysOnTop = true
 		billboard.MaxDistance = MAX_DISTANCE
 		billboard.ResetOnSpawn = false
@@ -810,17 +811,13 @@ local ItemESP = (function()
 			return nil
 		end
 
-		local highlights = {}
-		for _, part in ipairs(parts) do
-			highlights[part] = createHighlight(part, color)
-		end
-
-		local billboard, label = createBillboard(primary, tool.Name, color)
+		local highlight = createHighlight(tool, color)
+		local billboard, label = createBillboard(primary, tool.Name, color, topOffset(parts, primary))
 
 		return {
 			tool = tool,
 			color = color,
-			highlights = highlights,
+			highlight = highlight,
 			primary = primary,
 			billboard = billboard,
 			label = label,
@@ -828,11 +825,9 @@ local ItemESP = (function()
 	end
 
 	local function destroyEntry(entry)
-		for _, highlight in pairs(entry.highlights) do
-			highlight:Destroy()
+		if entry.highlight then
+			entry.highlight:Destroy()
 		end
-		table.clear(entry.highlights)
-
 		if entry.billboard then
 			entry.billboard:Destroy()
 		end
@@ -845,31 +840,25 @@ local ItemESP = (function()
 		end
 	end
 
-	-- Parts stream in and out, so keep the highlight set in sync on every scan.
-	local function syncParts(entry)
-		local parts = collectParts(entry.tool)
-		local current = {}
-
-		for _, part in ipairs(parts) do
-			current[part] = true
-			if not entry.highlights[part] then
-				entry.highlights[part] = createHighlight(part, entry.color)
-			end
+	-- Parts stream in and out, so re-anchor the label if its part disappears and keep
+	-- the offset clear of the item.
+	local function syncEntry(entry)
+		if entry.highlight and not entry.highlight.Parent then
+			entry.highlight = createHighlight(entry.tool, entry.color)
 		end
 
-		for part, highlight in pairs(entry.highlights) do
-			if not current[part] then
-				highlight:Destroy()
-				entry.highlights[part] = nil
-			end
+		local parts = collectParts(entry.tool)
+		if not entry.primary or not entry.primary.Parent then
+			entry.primary = primaryPart(parts)
+		end
+		if not entry.primary then
+			return
 		end
 
 		if not entry.billboard or not entry.billboard.Parent then
-			local primary = primaryPart(parts)
-			if primary then
-				entry.primary = primary
-				entry.billboard, entry.label = createBillboard(primary, entry.tool.Name, entry.color)
-			end
+			entry.billboard, entry.label = createBillboard(entry.primary, entry.tool.Name, entry.color, topOffset(parts, entry.primary))
+		else
+			entry.billboard.StudsOffsetWorldSpace = Vector3.new(0, topOffset(parts, entry.primary), 0)
 		end
 	end
 
@@ -888,7 +877,7 @@ local ItemESP = (function()
 					end
 				else
 					seen[tool] = true
-					syncParts(entry)
+					syncEntry(entry)
 				end
 			end
 		end
@@ -904,12 +893,9 @@ local ItemESP = (function()
 	local function updateEntry(entry)
 		local within = state.Enabled and entry.primary ~= nil and isWithinRange(entry.primary)
 
-		for _, highlight in pairs(entry.highlights) do
-			if highlight.Parent then
-				highlight.Enabled = within
-			end
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = within
 		end
-
 		if entry.billboard and entry.billboard.Parent then
 			entry.billboard.Enabled = state.Enabled
 		end
