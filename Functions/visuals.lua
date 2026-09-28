@@ -1157,9 +1157,9 @@ local TripmineESP = makeTrapESP({
 	end,
 })
 
--- Graffiti ESP. Survivors spray graffiti onto walls; the game names every placed one
--- "GraffitiCL" (a single BasePart whose ImageBeam holds the artwork). It gets a pink
--- highlight plus a label above it showing the part name.
+-- Graffiti ESP. Each spray leaves a "<Username>Spray" Model in Map.Ingame, whose Hitbox
+-- sits exactly where the graffiti is drawn. The Model is highlighted as a whole in pink,
+-- with a label above it showing the model name.
 local GraffitiESP = (function()
 	local state = {
 		Enabled = false,
@@ -1196,20 +1196,38 @@ local GraffitiESP = (function()
 		return containers
 	end
 
-	local function isGraffiti(instance)
-		return instance:IsA("BasePart")
-			and string.find(string.lower(instance.Name), "graffiti", 1, true) ~= nil
+	local function isSprayModel(instance)
+		return instance:IsA("Model")
+			and string.find(string.lower(instance.Name), "spray", 1, true) ~= nil
 	end
 
-	-- Distance from the graffiti's centre up to just above its top, allowing for rotation.
-	local function labelOffset(part)
-		local cframe = part.CFrame
-		local half = 0.5 * (
-			math.abs(cframe.RightVector.Y) * part.Size.X
-			+ math.abs(cframe.UpVector.Y) * part.Size.Y
-			+ math.abs(cframe.LookVector.Y) * part.Size.Z
-		)
-		return half + 1.2
+	local function firstPart(model)
+		for _, child in ipairs(model:GetChildren()) do
+			if child:IsA("BasePart") then
+				return child
+			end
+		end
+		return nil
+	end
+
+	-- Highest point of the model in world space, allowing for part rotation.
+	local function modelTop(model)
+		local top = -math.huge
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local cframe = part.CFrame
+				local half = 0.5 * (
+					math.abs(cframe.RightVector.Y) * part.Size.X
+					+ math.abs(cframe.UpVector.Y) * part.Size.Y
+					+ math.abs(cframe.LookVector.Y) * part.Size.Z
+				)
+				local y = part.Position.Y + half
+				if y > top then
+					top = y
+				end
+			end
+		end
+		return top
 	end
 
 	local function style(highlight)
@@ -1220,12 +1238,12 @@ local GraffitiESP = (function()
 		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	end
 
-	local function createBillboard(part)
+	local function createBillboard(part, text, offset)
 		local billboard = Instance.new("BillboardGui")
 		billboard.Name = "ForsakeniumGraffitiInfo"
 		billboard.Adornee = part
 		billboard.Size = UDim2.fromOffset(200, 18)
-		billboard.StudsOffsetWorldSpace = Vector3.new(0, labelOffset(part), 0)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
 		billboard.AlwaysOnTop = true
 		billboard.MaxDistance = MAX_DISTANCE
 		billboard.ResetOnSpawn = false
@@ -1244,22 +1262,28 @@ local GraffitiESP = (function()
 		label.TextStrokeTransparency = 0.5
 		label.TextXAlignment = Enum.TextXAlignment.Center
 		label.TextYAlignment = Enum.TextYAlignment.Center
-		label.Text = part.Name
+		label.Text = text
 		label.Parent = billboard
 
 		return billboard, label
 	end
 
-	local function createEntry(part)
+	local function createEntry(model)
+		local part = firstPart(model)
+		if not part then
+			return nil
+		end
+
 		local highlight = Instance.new("Highlight")
 		highlight.Name = "ForsakeniumGraffitiESP"
-		highlight.Adornee = part
-		highlight.Parent = part
+		highlight.Adornee = model
+		highlight.Parent = model
 		style(highlight)
 
-		local billboard, label = createBillboard(part)
+		local billboard, label = createBillboard(part, model.Name, modelTop(model) - part.Position.Y + 1.2)
 
 		return {
+			model = model,
 			part = part,
 			highlight = highlight,
 			billboard = billboard,
@@ -1288,7 +1312,7 @@ local GraffitiESP = (function()
 
 		for _, container in ipairs(getContainers()) do
 			for _, instance in ipairs(container:GetChildren()) do
-				if isGraffiti(instance) then
+				if isSprayModel(instance) then
 					seen[instance] = true
 
 					local entry = tracked[instance]
@@ -1300,7 +1324,13 @@ local GraffitiESP = (function()
 						if entry then
 							destroyEntry(entry)
 						end
-						tracked[instance] = createEntry(instance)
+
+						local created = createEntry(instance)
+						if created then
+							tracked[instance] = created
+						else
+							seen[instance] = nil
+						end
 					end
 				end
 			end
@@ -1324,7 +1354,7 @@ local GraffitiESP = (function()
 			entry.billboard.Enabled = state.Enabled
 		end
 		if entry.label then
-			entry.label.Text = entry.part.Name
+			entry.label.Text = entry.model.Name
 		end
 	end
 
@@ -1536,7 +1566,7 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Graffiti ESP",
-		Desc = "Highlight graffiti through walls with the graffiti's name.",
+		Desc = "Highlight sprayed graffiti in pink with its name.",
 		Value = false,
 		Callback = function(value)
 			GraffitiESP:SetEnabled(value)
