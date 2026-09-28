@@ -640,6 +640,9 @@ local ItemESP = (function()
 	local COLA_COLOR = Color3.fromRGB(205, 133, 63)
 	local DEFAULT_COLOR = Color3.fromRGB(120, 200, 255)
 
+	-- Once the player is this close the label just gets in the way of the item itself.
+	local TEXT_HIDE_DISTANCE = 16
+
 	local tracked = {}
 	local connections = {}
 	local scanClock = 0
@@ -890,14 +893,24 @@ local ItemESP = (function()
 		end
 	end
 
+	-- Hide the label when the player is close enough to see the item unaided.
+	local function isTooClose(position)
+		local reference = getReferencePosition()
+		if not reference or not position then
+			return false
+		end
+		return (position - reference).Magnitude <= TEXT_HIDE_DISTANCE
+	end
+
 	local function updateEntry(entry)
 		local within = state.Enabled and entry.primary ~= nil and isWithinRange(entry.primary)
+		local near = entry.primary ~= nil and isTooClose(entry.primary.Position)
 
 		if entry.highlight and entry.highlight.Parent then
 			entry.highlight.Enabled = within
 		end
 		if entry.billboard and entry.billboard.Parent then
-			entry.billboard.Enabled = state.Enabled
+			entry.billboard.Enabled = state.Enabled and not near
 		end
 		if entry.label then
 			entry.label.Text = entry.tool.Name
