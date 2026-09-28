@@ -8,6 +8,22 @@ if _G.__Forsakenium then
 	pcall(_G.__Forsakenium)
 end
 
+--// WindUI lives in CoreGui. A run that was stopped mid-way (or whose handler got
+--// replaced) can leave extra WindUI screens behind, so clear every one before this run
+--// creates its own. This keeps exactly one window alive no matter how often we reload.
+local function clearLeftoverWindUI()
+	local core = game:GetService("CoreGui")
+	for _, descendant in ipairs(core:GetDescendants()) do
+		if descendant:IsA("ScreenGui") and descendant.Name == "WindUI" then
+			pcall(function()
+				descendant:Destroy()
+			end)
+		end
+	end
+end
+
+clearLeftoverWindUI()
+
 --// Sources
 local REPO = "https://raw.githubusercontent.com/permanentlyyy/forsakenium-2/main"
 
@@ -168,4 +184,6 @@ _G.__Forsakenium = function()
 	pcall(function()
 		Window:Destroy()
 	end)
+
+	clearLeftoverWindUI()
 end
