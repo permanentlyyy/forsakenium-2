@@ -1588,6 +1588,198 @@ local JohnDoeShadowESP = (function()
 	return api
 end)()
 
+-- c00lkidd minions. His Pizza Delivery minions are cloned per skin, so their names vary a
+-- lot (PizzaDeliveryRig, Guitar/Saxophone/Harp/Tuba, Minion1-3, Mafia1-4, Groll1-2, ...),
+-- which makes name matching useless. Instead this matches the spawned minion rigs: Models
+-- in the round area that carry a Humanoid but are not players or survivor constructs.
+-- Fixed red, deliberately independent of the Killer ESP colour picker.
+local CoolkiddMinionESP = (function()
+	local COLOR = Color3.fromRGB(255, 0, 0)
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function isCoolkiddKiller()
+		local players = workspace:FindFirstChild("Players")
+		local killers = players and players:FindFirstChild("Killers")
+		if not killers then
+			return false
+		end
+
+		for _, character in ipairs(killers:GetChildren()) do
+			local name = string.lower(character.Name):gsub("%s", "")
+			if string.find(name, "c00lkidd", 1, true) or string.find(name, "coolkidd", 1, true) then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	local function isMinionModel(model)
+		if not model:IsA("Model") then
+			return false
+		end
+		if not model:FindFirstChildOfClass("Humanoid") then
+			return false
+		end
+		if model:IsDescendantOf(workspace.Players) then
+			return false
+		end
+		if model:HasTag("SurvivorConstruct") then
+			return false
+		end
+		if model:GetAttribute("Team") == "Survivors" then
+			return false
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		if map then
+			local lobby = map:FindFirstChild("Lobby")
+			if lobby and model:IsDescendantOf(lobby) then
+				return false
+			end
+
+			local ingame = map:FindFirstChild("Ingame")
+			local decor = ingame and ingame:FindFirstChild("Map")
+			if decor and model:IsDescendantOf(decor) then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	local function collectMinionModels()
+		local models = {}
+
+		local function scan(container)
+			for _, child in ipairs(container:GetChildren()) do
+				if isMinionModel(child) then
+					table.insert(models, child)
+				elseif child:IsA("Folder") then
+					for _, nested in ipairs(child:GetChildren()) do
+						if isMinionModel(nested) then
+							table.insert(models, nested)
+						end
+					end
+				end
+			end
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		local ingame = map and map:FindFirstChild("Ingame")
+		if ingame then
+			scan(ingame)
+		end
+
+		local misc = workspace:FindFirstChild("Misc")
+		if misc then
+			scan(misc)
+		end
+
+		return models
+	end
+
+	local function style(highlight)
+		highlight.FillColor = COLOR
+		highlight.OutlineColor = COLOR
+		highlight.FillTransparency = 0.7
+		highlight.OutlineTransparency = 0.3
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(model)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumMinionESP"
+		highlight.Adornee = model
+		highlight.Parent = model
+		style(highlight)
+		return { model = model, highlight = highlight }
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for model, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[model] = nil
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = isWithinRange(entry.model)
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, model in ipairs(collectMinionModels()) do
+			seen[model] = true
+
+			local entry = tracked[model]
+			local broken = entry and (not entry.highlight or not entry.highlight.Parent)
+
+			if not entry or broken then
+				if entry then
+					destroyEntry(entry)
+				end
+				tracked[model] = createEntry(model)
+			end
+		end
+
+		for model, entry in pairs(tracked) do
+			if not seen[model] then
+				destroyEntry(entry)
+				tracked[model] = nil
+			end
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not (KillerESP:IsEnabled() and isCoolkiddKiller()) then
+			if next(tracked) ~= nil then
+				clearAll()
+			end
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api.Unload()
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -1800,6 +1992,7 @@ function Visuals.Unload()
 	TripmineESP.Unload()
 	GraffitiESP.Unload()
 	JohnDoeShadowESP.Unload()
+	CoolkiddMinionESP.Unload()
 end
 
 return Visuals
