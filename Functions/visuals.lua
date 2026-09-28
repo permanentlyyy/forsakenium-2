@@ -1313,12 +1313,6 @@ function Visuals.Build(Tab, ctx)
 	})
 
 	Tab:Toggle({
-		Title = "Ritual ESP",
-		Desc = "Highlight ritual objects through walls.",
-		Value = false,
-	})
-
-	Tab:Toggle({
 		Title = "Graffiti ESP",
 		Desc = "Highlight graffiti through walls.",
 		Value = false,
