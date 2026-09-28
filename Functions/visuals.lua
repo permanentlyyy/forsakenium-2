@@ -400,6 +400,10 @@ local function makeESP(opts)
 		afterToggle(enabled)
 	end
 
+	function api:IsEnabled()
+		return state.Enabled
+	end
+
 	function api:SetColor(color)
 		state.Color = color
 		applyAll()
@@ -1409,6 +1413,178 @@ local GraffitiESP = (function()
 	return api
 end)()
 
+-- John Doe shadows. While Killer ESP is on and the local player is playing John Doe, any
+-- "Shadow" part gets a highlight and is forced fully opaque so it can always be seen.
+-- No separate toggle: it follows Killer ESP plus the John Doe check automatically.
+local JohnDoeShadowESP = (function()
+	local COLOR = Color3.fromRGB(255, 82, 85)
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function isLocalJohnDoe()
+		local character = LocalPlayer.Character
+		if not character then
+			return false
+		end
+
+		local name = string.lower(character.Name):gsub("%s", "")
+		return string.find(name, "johndoe", 1, true) ~= nil
+	end
+
+	local function collectShadowParts()
+		local parts = {}
+
+		local function fromContainer(container)
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("BasePart")
+					and string.find(string.lower(child.Name), "shadow", 1, true) then
+					table.insert(parts, child)
+				elseif child:IsA("Folder")
+					and string.find(string.lower(child.Name), "shadow", 1, true) then
+					for _, nested in ipairs(child:GetChildren()) do
+						if nested:IsA("BasePart")
+							and string.find(string.lower(nested.Name), "shadow", 1, true) then
+							table.insert(parts, nested)
+						end
+					end
+				end
+			end
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return parts
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		if ingame then
+			fromContainer(ingame)
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		if lobby then
+			fromContainer(lobby)
+		end
+
+		return parts
+	end
+
+	local function style(highlight)
+		highlight.FillColor = COLOR
+		highlight.OutlineColor = COLOR
+		highlight.FillTransparency = 0.7
+		highlight.OutlineTransparency = 0.3
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(part)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumShadowESP"
+		highlight.Adornee = part
+		highlight.Parent = part
+		style(highlight)
+
+		return {
+			part = part,
+			highlight = highlight,
+			originalTransparency = part.Transparency,
+		}
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+		if entry.part and entry.part.Parent and entry.originalTransparency ~= nil then
+			entry.part.Transparency = entry.originalTransparency
+		end
+	end
+
+	local function clearAll()
+		for part, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[part] = nil
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = isWithinRange(entry.part)
+		end
+
+		-- Anything that is not fully opaque gets forced to 0 transparency.
+		if entry.part.Parent and entry.part.Transparency ~= 0 then
+			if entry.originalTransparency == nil then
+				entry.originalTransparency = entry.part.Transparency
+			end
+			entry.part.Transparency = 0
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, part in ipairs(collectShadowParts()) do
+			seen[part] = true
+
+			local entry = tracked[part]
+			local broken = entry and (not entry.highlight or not entry.highlight.Parent)
+
+			if not entry or broken then
+				if entry then
+					destroyEntry(entry)
+				end
+				tracked[part] = createEntry(part)
+			end
+		end
+
+		for part, entry in pairs(tracked) do
+			if not seen[part] then
+				destroyEntry(entry)
+				tracked[part] = nil
+			end
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not (KillerESP:IsEnabled() and isLocalJohnDoe()) then
+			if next(tracked) ~= nil then
+				clearAll()
+			end
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api.Unload()
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -1620,6 +1796,7 @@ function Visuals.Unload()
 	TripwireESP.Unload()
 	TripmineESP.Unload()
 	GraffitiESP.Unload()
+	JohnDoeShadowESP.Unload()
 end
 
 return Visuals
