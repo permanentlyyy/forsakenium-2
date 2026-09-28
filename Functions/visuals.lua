@@ -968,6 +968,214 @@ local ItemESP = (function()
 	return api
 end)()
 
+-- Tripwire / subspace tripmine ESP. Survivors place these traps, so both only ever show
+-- while the local player is the killer. The check runs before anything is highlighted and
+-- again every frame, so highlights drop immediately if the player is not the killer.
+local function isLocalPlayerKiller()
+	local character = LocalPlayer.Character
+	if not character then
+		return false
+	end
+
+	local players = workspace:FindFirstChild("Players")
+	local killers = players and players:FindFirstChild("Killers")
+	return killers ~= nil and character:IsDescendantOf(killers)
+end
+
+-- A trap carried inside a character is not a placed trap, so leave it alone.
+local function isCarriedByCharacter(instance)
+	local node = instance.Parent
+	while node and node ~= workspace do
+		if node:IsA("Model") and node:FindFirstChildOfClass("Humanoid") then
+			return true
+		end
+		node = node.Parent
+	end
+	return false
+end
+
+local function makeTrapESP(opts)
+	local state = {
+		Enabled = false,
+		Color = opts.color,
+		FillTransparency = 0.7,
+		OutlineTransparency = 0.3,
+	}
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function getContainers()
+		local containers = {}
+		local map = workspace:FindFirstChild("Map")
+		if not map then
+			return containers
+		end
+
+		local ingame = map:FindFirstChild("Ingame")
+		if ingame then
+			table.insert(containers, ingame)
+			local ingameMap = ingame:FindFirstChild("Map")
+			if ingameMap then
+				table.insert(containers, ingameMap)
+			end
+		end
+
+		local lobby = map:FindFirstChild("Lobby")
+		if lobby then
+			table.insert(containers, lobby)
+			local interactive = lobby:FindFirstChild("Interactive")
+			if interactive then
+				table.insert(containers, interactive)
+			end
+		end
+
+		return containers
+	end
+
+	local function style(highlight)
+		highlight.FillColor = state.Color
+		highlight.OutlineColor = state.Color
+		highlight.FillTransparency = state.FillTransparency
+		highlight.OutlineTransparency = state.OutlineTransparency
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(model)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = opts.highlightName
+		highlight.Adornee = model
+		highlight.Parent = model
+		style(highlight)
+		return { model = model, highlight = highlight }
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for model, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[model] = nil
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, container in ipairs(getContainers()) do
+			for _, model in ipairs(container:GetChildren()) do
+				if model:IsA("Model") and opts.matches(model) and not isCarriedByCharacter(model) then
+					seen[model] = true
+
+					local entry = tracked[model]
+					if not entry then
+						tracked[model] = createEntry(model)
+					elseif not entry.highlight or not entry.highlight.Parent then
+						destroyEntry(entry)
+						tracked[model] = createEntry(model)
+					end
+				end
+			end
+		end
+
+		for model, entry in pairs(tracked) do
+			if not seen[model] then
+				destroyEntry(entry)
+				tracked[model] = nil
+			end
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = state.Enabled and isWithinRange(entry.model)
+		end
+	end
+
+	local function applyAll()
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not state.Enabled then
+			return
+		end
+
+		-- Gate first: anything other than the local killer means no highlights at all.
+		if not isLocalPlayerKiller() then
+			if next(tracked) ~= nil then
+				clearAll()
+			end
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+
+		if enabled and isLocalPlayerKiller() then
+			pcall(scan)
+		else
+			clearAll()
+		end
+
+		applyAll()
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end
+
+local TRAP_COLOR = Color3.fromRGB(191, 255, 191)
+
+local TripwireESP = makeTrapESP({
+	highlightName = "ForsakeniumTripwireESP",
+	color = TRAP_COLOR,
+	matches = function(model)
+		return string.find(string.lower(model.Name), "tripwire", 1, true) ~= nil
+	end,
+})
+
+local TripmineESP = makeTrapESP({
+	highlightName = "ForsakeniumTripmineESP",
+	color = TRAP_COLOR,
+	matches = function(model)
+		return string.find(string.lower(model.Name), "tripmine", 1, true) ~= nil
+	end,
+})
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -1107,14 +1315,20 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Tripwire ESP",
-		Desc = "Highlight tripwires through walls.",
+		Desc = "Highlight tripwires through walls (killer only).",
 		Value = false,
+		Callback = function(value)
+			TripwireESP:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Subspace Tripmine ESP",
-		Desc = "Highlight subspace tripmines through walls.",
+		Desc = "Highlight subspace tripmines through walls (killer only).",
 		Value = false,
+		Callback = function(value)
+			TripmineESP:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
@@ -1173,6 +1387,8 @@ function Visuals.Unload()
 	SurvivorESP.Unload()
 	GeneratorESP.Unload()
 	ItemESP.Unload()
+	TripwireESP.Unload()
+	TripmineESP.Unload()
 end
 
 return Visuals
