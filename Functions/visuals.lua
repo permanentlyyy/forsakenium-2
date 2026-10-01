@@ -522,9 +522,9 @@ local GeneratorESP = (function()
 		return nil
 	end
 
-	-- Highest visible point of the model in world space, allowing for part rotation. Fully
-	-- transparent parts (the 200-stud COLLISION box, progress bars) are ignored so the label
-	-- does not fly off the top of an invisible part.
+	-- Highest visible point of the model in world space, allowing for part rotation. The
+	-- game hides its collision box (and some helper parts) with Transparency 0.999 rather
+	-- than 1, so anything that faint is ignored to keep the label off the 200-stud box.
 	local function modelTop(model)
 		local top = -math.huge
 		local anyPart = -math.huge
@@ -542,7 +542,7 @@ local GeneratorESP = (function()
 				if y > anyPart then
 					anyPart = y
 				end
-				if part.Transparency < 1 and y > top then
+				if part.Transparency < 0.99 and y > top then
 					top = y
 				end
 			end
