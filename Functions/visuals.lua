@@ -1916,7 +1916,7 @@ local AzureTrapESP = (function()
 	local RANGE_RADII = { bulb = 30, vine = 20 }
 	local RANGE_THICKNESS = 0.2
 	local RANGE_TRANSPARENCY = 0.6
-	local RANGE_LIFT = 0.4
+	local RANGE_LIFT = 0.1
 
 	local tracked = {}
 	local connections = {}
@@ -1974,9 +1974,7 @@ local AzureTrapESP = (function()
 		return folder
 	end
 
-	-- Flat disc lying on the ground, sized to the construct's detection radius. A Highlight
-	-- with AlwaysOnTop rides along so the whole circle still draws when uneven terrain pokes
-	-- through the disc or hides part of it behind a slope.
+	-- Flat disc lying on the ground, sized to the construct's detection radius.
 	local function createRangeDisc(radius, position)
 		local disc = Instance.new("Part")
 		disc.Name = "ForsakeniumAzureRange"
@@ -1992,17 +1990,6 @@ local AzureTrapESP = (function()
 		disc.Color = state.Color
 		disc.Transparency = RANGE_TRANSPARENCY
 		disc.Parent = rangeFolder()
-
-		local outline = Instance.new("Highlight")
-		outline.Name = "ForsakeniumAzureRangeOutline"
-		outline.Adornee = disc
-		outline.FillColor = state.Color
-		outline.OutlineColor = state.Color
-		outline.FillTransparency = 0.8
-		outline.OutlineTransparency = 0.15
-		outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-		outline.Parent = disc
-
 		return disc
 	end
 
@@ -2110,11 +2097,6 @@ local AzureTrapESP = (function()
 			end
 			entry.disc.Color = state.Color
 			entry.disc.Transparency = within and RANGE_TRANSPARENCY or 1
-
-			local outline = entry.disc:FindFirstChild("ForsakeniumAzureRangeOutline")
-			if outline then
-				outline.Enabled = within
-			end
 		end
 	end
 
