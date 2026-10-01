@@ -2005,11 +2005,12 @@ local AzureTrapESP = (function()
 		return nil
 	end
 
-	-- Highest visible point of the model, so the label clears the plant instead of landing
-	-- inside it (Azure hides helper parts with Transparency 0.999).
-	local function modelTop(model)
-		local top = -math.huge
-		local anyPart = -math.huge
+	-- Vertical centre of the model's visible parts, so the label sits in the middle of the
+	-- plant instead of on top of it (tall vines pushed it way up). Helper parts the game
+	-- hides with Transparency 0.999 are ignored.
+	local function modelCentreOffset(model, anchor)
+		local top, bottom = -math.huge, math.huge
+		local anyTop, anyBottom = -math.huge, math.huge
 
 		for _, part in ipairs(model:GetDescendants()) do
 			if part:IsA("BasePart") then
@@ -2019,21 +2020,33 @@ local AzureTrapESP = (function()
 					+ math.abs(cframe.UpVector.Y) * part.Size.Y
 					+ math.abs(cframe.LookVector.Y) * part.Size.Z
 				)
-				local y = part.Position.Y + half
+				local high, low = part.Position.Y + half, part.Position.Y - half
 
-				if y > anyPart then
-					anyPart = y
+				if high > anyTop then
+					anyTop = high
 				end
-				if part.Transparency < 0.99 and y > top then
-					top = y
+				if low < anyBottom then
+					anyBottom = low
+				end
+				if part.Transparency < 0.99 then
+					if high > top then
+						top = high
+					end
+					if low < bottom then
+						bottom = low
+					end
 				end
 			end
 		end
 
 		if top == -math.huge then
-			return anyPart
+			top, bottom = anyTop, anyBottom
 		end
-		return top
+		if top == -math.huge then
+			return 2
+		end
+
+		return (top + bottom) / 2 - anchor.Position.Y
 	end
 
 	local function labelFor(model)
@@ -2098,7 +2111,7 @@ local AzureTrapESP = (function()
 		if not model:GetAttribute("AzureConstruct") then
 			local part = firstPart(model)
 			if part then
-				billboard, label = createBillboard(part, labelFor(model), modelTop(model) - part.Position.Y + 1.2)
+				billboard, label = createBillboard(part, labelFor(model), modelCentreOffset(model, part))
 			end
 		end
 
@@ -2116,7 +2129,7 @@ local AzureTrapESP = (function()
 			return
 		end
 
-		local offset = modelTop(entry.model) - part.Position.Y + 1.2
+		local offset = modelCentreOffset(entry.model, part)
 		if not entry.billboard or not entry.billboard.Parent then
 			entry.billboard, entry.label = createBillboard(part, labelFor(entry.model), offset)
 		else
