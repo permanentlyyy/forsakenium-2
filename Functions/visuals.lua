@@ -1916,6 +1916,7 @@ local AzureTrapESP = (function()
 	local RANGE_RADII = { bulb = 30, vine = 20 }
 	local RANGE_THICKNESS = 0.2
 	local RANGE_TRANSPARENCY = 0.6
+	local RANGE_LIFT = 0.4
 
 	local tracked = {}
 	local connections = {}
@@ -1973,13 +1974,15 @@ local AzureTrapESP = (function()
 		return folder
 	end
 
-	-- Flat disc lying on the ground, sized to the construct's detection radius.
+	-- Flat disc lying on the ground, sized to the construct's detection radius. A Highlight
+	-- with AlwaysOnTop rides along so the whole circle still draws when uneven terrain pokes
+	-- through the disc or hides part of it behind a slope.
 	local function createRangeDisc(radius, position)
 		local disc = Instance.new("Part")
 		disc.Name = "ForsakeniumAzureRange"
 		disc.Shape = Enum.PartType.Cylinder
 		disc.Size = Vector3.new(RANGE_THICKNESS, radius * 2, radius * 2)
-		disc.CFrame = CFrame.new(position + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		disc.CFrame = CFrame.new(position + Vector3.new(0, RANGE_LIFT, 0)) * CFrame.Angles(0, 0, math.rad(90))
 		disc.Anchored = true
 		disc.CanCollide = false
 		disc.CanQuery = false
@@ -1989,6 +1992,17 @@ local AzureTrapESP = (function()
 		disc.Color = state.Color
 		disc.Transparency = RANGE_TRANSPARENCY
 		disc.Parent = rangeFolder()
+
+		local outline = Instance.new("Highlight")
+		outline.Name = "ForsakeniumAzureRangeOutline"
+		outline.Adornee = disc
+		outline.FillColor = state.Color
+		outline.OutlineColor = state.Color
+		outline.FillTransparency = 0.8
+		outline.OutlineTransparency = 0.15
+		outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		outline.Parent = disc
+
 		return disc
 	end
 
@@ -2091,11 +2105,16 @@ local AzureTrapESP = (function()
 		if entry.disc and entry.disc.Parent then
 			local anchor = entry.model.PrimaryPart or entry.model:FindFirstChildWhichIsA("BasePart")
 			if anchor then
-				entry.disc.CFrame = CFrame.new(anchor.Position + Vector3.new(0, 0.1, 0))
+				entry.disc.CFrame = CFrame.new(anchor.Position + Vector3.new(0, RANGE_LIFT, 0))
 					* CFrame.Angles(0, 0, math.rad(90))
 			end
 			entry.disc.Color = state.Color
 			entry.disc.Transparency = within and RANGE_TRANSPARENCY or 1
+
+			local outline = entry.disc:FindFirstChild("ForsakeniumAzureRangeOutline")
+			if outline then
+				outline.Enabled = within
+			end
 		end
 	end
 
