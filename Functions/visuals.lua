@@ -510,18 +510,96 @@ local GeneratorESP = (function()
 		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	end
 
+	local function firstPart(model)
+		if model.PrimaryPart then
+			return model.PrimaryPart
+		end
+		for _, child in ipairs(model:GetChildren()) do
+			if child:IsA("BasePart") then
+				return child
+			end
+		end
+		return nil
+	end
+
+	-- Highest point of the model in world space, allowing for part rotation.
+	local function modelTop(model)
+		local top = -math.huge
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local cframe = part.CFrame
+				local half = 0.5 * (
+					math.abs(cframe.RightVector.Y) * part.Size.X
+					+ math.abs(cframe.UpVector.Y) * part.Size.Y
+					+ math.abs(cframe.LookVector.Y) * part.Size.Z
+				)
+				local y = part.Position.Y + half
+				if y > top then
+					top = y
+				end
+			end
+		end
+		return top
+	end
+
+	local function createBillboard(part, offset)
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "ForsakeniumGeneratorInfo"
+		billboard.Adornee = part
+		billboard.Size = UDim2.fromOffset(160, 18)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = MAX_DISTANCE
+		billboard.ResetOnSpawn = false
+		billboard.LightInfluence = 0
+		billboard.Enabled = false
+		billboard.Parent = part
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Info"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamMedium
+		label.TextSize = 13
+		label.TextColor3 = state.Color
+		label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+		label.TextStrokeTransparency = 0.5
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextYAlignment = Enum.TextYAlignment.Center
+		label.Text = "Generator"
+		label.Parent = billboard
+
+		return billboard, label
+	end
+
 	local function createEntry(model)
 		local highlight = Instance.new("Highlight")
 		highlight.Name = "ForsakeniumGeneratorESP"
 		highlight.Adornee = model
 		highlight.Parent = model
 		style(highlight)
-		return { model = model, highlight = highlight }
+
+		local part = firstPart(model)
+		local billboard, label
+		if part then
+			billboard, label = createBillboard(part, modelTop(model) - part.Position.Y + 1.2)
+		end
+
+		return {
+			model = model,
+			highlight = highlight,
+			part = part,
+			billboard = billboard,
+			label = label,
+		}
 	end
 
 	local function destroyEntry(entry)
 		if entry.highlight then
 			entry.highlight:Destroy()
+		end
+		if entry.billboard then
+			entry.billboard:Destroy()
 		end
 	end
 
@@ -529,6 +607,22 @@ local GeneratorESP = (function()
 		for model, entry in pairs(tracked) do
 			destroyEntry(entry)
 			tracked[model] = nil
+		end
+	end
+
+	-- Keep the label anchored to a live part and clear of the model's top.
+	local function syncEntry(entry)
+		local part = firstPart(entry.model)
+		if not part then
+			return
+		end
+		entry.part = part
+
+		local offset = modelTop(entry.model) - part.Position.Y + 1.2
+		if not entry.billboard or not entry.billboard.Parent then
+			entry.billboard, entry.label = createBillboard(part, offset)
+		else
+			entry.billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
 		end
 	end
 
@@ -548,6 +642,8 @@ local GeneratorESP = (function()
 					elseif broken then
 						destroyEntry(entry)
 						tracked[model] = createEntry(model)
+					else
+						syncEntry(entry)
 					end
 				end
 			end
@@ -562,10 +658,18 @@ local GeneratorESP = (function()
 	end
 
 	local function updateEntry(entry)
+		local visible = state.Enabled
+			and not isCompleted(entry.model)
+			and isWithinRange(entry.part or entry.model)
+
 		if entry.highlight and entry.highlight.Parent then
-			entry.highlight.Enabled = state.Enabled
-				and not isCompleted(entry.model)
-				and isWithinRange(entry.model)
+			entry.highlight.Enabled = visible
+		end
+		if entry.billboard and entry.billboard.Parent then
+			entry.billboard.Enabled = visible
+		end
+		if entry.label then
+			entry.label.Text = "Generator"
 		end
 	end
 
@@ -610,6 +714,9 @@ local GeneratorESP = (function()
 		for _, entry in pairs(tracked) do
 			if entry.highlight then
 				style(entry.highlight)
+			end
+			if entry.label then
+				entry.label.TextColor3 = color
 			end
 		end
 	end
