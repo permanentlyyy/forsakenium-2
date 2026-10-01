@@ -522,9 +522,13 @@ local GeneratorESP = (function()
 		return nil
 	end
 
-	-- Highest point of the model in world space, allowing for part rotation.
+	-- Highest visible point of the model in world space, allowing for part rotation. Fully
+	-- transparent parts (the 200-stud COLLISION box, progress bars) are ignored so the label
+	-- does not fly off the top of an invisible part.
 	local function modelTop(model)
 		local top = -math.huge
+		local anyPart = -math.huge
+
 		for _, part in ipairs(model:GetDescendants()) do
 			if part:IsA("BasePart") then
 				local cframe = part.CFrame
@@ -534,10 +538,18 @@ local GeneratorESP = (function()
 					+ math.abs(cframe.LookVector.Y) * part.Size.Z
 				)
 				local y = part.Position.Y + half
-				if y > top then
+
+				if y > anyPart then
+					anyPart = y
+				end
+				if part.Transparency < 1 and y > top then
 					top = y
 				end
 			end
+		end
+
+		if top == -math.huge then
+			return anyPart
 		end
 		return top
 	end
