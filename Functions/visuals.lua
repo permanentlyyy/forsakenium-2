@@ -1899,6 +1899,165 @@ local CoolkiddMinionESP = (function()
 	return api
 end)()
 
+-- Azure trap ESP. Azure places two constructs -- "Blossom" (Vine) and "Sow" (GroundBulb).
+-- Each placement spawns an invisible "<player>'s <Type>" model carrying the AzureConstruct
+-- attribute, plus its visible "<Type>Model". Both are highlighted so the traps show through
+-- walls. Name matching is included because the visual model's name varies by skin.
+local AzureTrapESP = (function()
+	local state = {
+		Enabled = false,
+		Color = Color3.fromRGB(0, 170, 255),
+		FillTransparency = 0.7,
+		OutlineTransparency = 0.3,
+	}
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function isAzureTrap(model)
+		if not model:IsA("Model") then
+			return false
+		end
+		if model:GetAttribute("AzureConstruct") then
+			return true
+		end
+
+		local name = string.lower(model.Name)
+		return string.find(name, "vine", 1, true) ~= nil
+			or string.find(name, "bulb", 1, true) ~= nil
+	end
+
+	-- Round-spawned constructs live directly under Map.Ingame.
+	local function collectTraps()
+		local traps = {}
+		local map = workspace:FindFirstChild("Map")
+		local ingame = map and map:FindFirstChild("Ingame")
+		if not ingame then
+			return traps
+		end
+
+		for _, child in ipairs(ingame:GetChildren()) do
+			if isAzureTrap(child) then
+				table.insert(traps, child)
+			end
+		end
+
+		return traps
+	end
+
+	local function style(highlight)
+		highlight.FillColor = state.Color
+		highlight.OutlineColor = state.Color
+		highlight.FillTransparency = state.FillTransparency
+		highlight.OutlineTransparency = state.OutlineTransparency
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(model)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ForsakeniumAzureTrapESP"
+		highlight.Adornee = model
+		highlight.Parent = model
+		style(highlight)
+		return { model = model, highlight = highlight }
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for model, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[model] = nil
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, model in ipairs(collectTraps()) do
+			seen[model] = true
+
+			local entry = tracked[model]
+			local broken = entry and (not entry.highlight or not entry.highlight.Parent)
+
+			if not entry or broken then
+				if entry then
+					destroyEntry(entry)
+				end
+				tracked[model] = createEntry(model)
+			end
+		end
+
+		for model, entry in pairs(tracked) do
+			if not seen[model] then
+				destroyEntry(entry)
+				tracked[model] = nil
+			end
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = state.Enabled and isWithinRange(entry.model)
+		end
+	end
+
+	local function applyAll()
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not state.Enabled then
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+		if enabled then
+			pcall(scan)
+		else
+			clearAll()
+		end
+		applyAll()
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -2063,6 +2222,15 @@ function Visuals.Build(Tab, ctx)
 		end,
 	})
 
+	Tab:Toggle({
+		Title = "Azure Trap ESP",
+		Desc = "Highlight Azure's placed traps (vine and ground bulb).",
+		Value = false,
+		Callback = function(value)
+			AzureTrapESP:SetEnabled(value)
+		end,
+	})
+
 	Tab:Section({ Title = "Tracers", Icon = "route", TextSize = 15 })
 
 	Tab:Toggle({
@@ -2110,6 +2278,7 @@ function Visuals.Unload()
 	TripwireESP.Unload()
 	TripmineESP.Unload()
 	GraffitiESP.Unload()
+	AzureTrapESP.Unload()
 	JohnDoeShadowESP.Unload()
 	CoolkiddMinionESP.Unload()
 end
