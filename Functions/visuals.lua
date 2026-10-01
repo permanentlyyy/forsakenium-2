@@ -1906,10 +1906,15 @@ end)()
 local AzureTrapESP = (function()
 	local state = {
 		Enabled = false,
-		Color = Color3.fromRGB(0, 170, 255),
+		Color = Color3.fromRGB(170, 0, 255),
 		FillTransparency = 0.7,
 		OutlineTransparency = 0.3,
 	}
+
+	-- Detection radius per construct, from Azure's ConstructConfigs (GroundBulb 30, Vine 20).
+	local RANGE_RADII = { bulb = 30, vine = 20 }
+	local RANGE_THICKNESS = 0.2
+	local RANGE_TRANSPARENCY = 0.6
 
 	local tracked = {}
 	local connections = {}
@@ -1946,6 +1951,46 @@ local AzureTrapESP = (function()
 		return traps
 	end
 
+	-- Radius the construct detects/attacks within.
+	local function radiusFor(model)
+		local name = string.lower(model.Name)
+		for keyword, radius in pairs(RANGE_RADII) do
+			if string.find(name, keyword, 1, true) then
+				return radius
+			end
+		end
+		return nil
+	end
+
+	local function rangeFolder()
+		local folder = workspace:FindFirstChild("ForsakeniumAzureRanges")
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = "ForsakeniumAzureRanges"
+			folder.Parent = workspace
+		end
+		return folder
+	end
+
+	-- Flat disc lying on the ground, sized to the construct's detection radius.
+	local function createRangeDisc(radius, position)
+		local disc = Instance.new("Part")
+		disc.Name = "ForsakeniumAzureRange"
+		disc.Shape = Enum.PartType.Cylinder
+		disc.Size = Vector3.new(RANGE_THICKNESS, radius * 2, radius * 2)
+		disc.CFrame = CFrame.new(position + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		disc.Anchored = true
+		disc.CanCollide = false
+		disc.CanQuery = false
+		disc.CanTouch = false
+		disc.CastShadow = false
+		disc.Material = Enum.Material.Neon
+		disc.Color = state.Color
+		disc.Transparency = RANGE_TRANSPARENCY
+		disc.Parent = rangeFolder()
+		return disc
+	end
+
 	local function style(highlight)
 		highlight.FillColor = state.Color
 		highlight.OutlineColor = state.Color
@@ -1960,12 +2005,27 @@ local AzureTrapESP = (function()
 		highlight.Adornee = model
 		highlight.Parent = model
 		style(highlight)
-		return { model = model, highlight = highlight }
+
+		-- Only the invisible construct anchor gets a range disc, so the visible model
+		-- (VineModel / GroundBulbModel) does not spawn a duplicate.
+		local disc
+		if model:GetAttribute("AzureConstruct") then
+			local radius = radiusFor(model)
+			local anchor = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+			if radius and anchor then
+				disc = createRangeDisc(radius, anchor.Position)
+			end
+		end
+
+		return { model = model, highlight = highlight, disc = disc }
 	end
 
 	local function destroyEntry(entry)
 		if entry.highlight then
 			entry.highlight:Destroy()
+		end
+		if entry.disc then
+			entry.disc:Destroy()
 		end
 	end
 
@@ -1973,6 +2033,11 @@ local AzureTrapESP = (function()
 		for model, entry in pairs(tracked) do
 			destroyEntry(entry)
 			tracked[model] = nil
+		end
+
+		local folder = workspace:FindFirstChild("ForsakeniumAzureRanges")
+		if folder then
+			folder:Destroy()
 		end
 	end
 
@@ -2002,8 +2067,20 @@ local AzureTrapESP = (function()
 	end
 
 	local function updateEntry(entry)
+		local within = state.Enabled and isWithinRange(entry.model)
+
 		if entry.highlight and entry.highlight.Parent then
-			entry.highlight.Enabled = state.Enabled and isWithinRange(entry.model)
+			entry.highlight.Enabled = within
+		end
+
+		if entry.disc and entry.disc.Parent then
+			local anchor = entry.model.PrimaryPart or entry.model:FindFirstChildWhichIsA("BasePart")
+			if anchor then
+				entry.disc.CFrame = CFrame.new(anchor.Position + Vector3.new(0, 0.1, 0))
+					* CFrame.Angles(0, 0, math.rad(90))
+			end
+			entry.disc.Color = state.Color
+			entry.disc.Transparency = within and RANGE_TRANSPARENCY or 1
 		end
 	end
 
@@ -2224,7 +2301,7 @@ function Visuals.Build(Tab, ctx)
 
 	Tab:Toggle({
 		Title = "Azure Trap ESP",
-		Desc = "Highlight Azure's placed traps (vine and ground bulb).",
+		Desc = "Highlight Azure's traps and show their detection radius.",
 		Value = false,
 		Callback = function(value)
 			AzureTrapESP:SetEnabled(value)
