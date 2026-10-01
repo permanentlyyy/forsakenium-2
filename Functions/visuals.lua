@@ -1905,7 +1905,8 @@ end)()
 -- walls. Name matching is included because the visual model's name varies by skin.
 local AzureTrapESP = (function()
 	local state = {
-		Enabled = false,
+		-- The highlight follows Killer ESP; only the range discs have their own toggle.
+		ShowRange = true,
 		Color = Color3.fromRGB(170, 0, 255),
 		FillTransparency = 0.7,
 		OutlineTransparency = 0.3,
@@ -2005,19 +2006,30 @@ local AzureTrapESP = (function()
 		highlight.Adornee = model
 		highlight.Parent = model
 		style(highlight)
+		return { model = model, highlight = highlight }
+	end
 
-		-- Only the invisible construct anchor gets a range disc, so the visible model
-		-- (VineModel / GroundBulbModel) does not spawn a duplicate.
-		local disc
-		if model:GetAttribute("AzureConstruct") then
-			local radius = radiusFor(model)
-			local anchor = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-			if radius and anchor then
-				disc = createRangeDisc(radius, anchor.Position)
-			end
+	-- Only the invisible construct anchor gets a disc, so the visible model
+	-- (VineModel / GroundBulbModel) does not spawn a duplicate.
+	local function syncDisc(entry)
+		if not entry.model:GetAttribute("AzureConstruct") then
+			return
 		end
 
-		return { model = model, highlight = highlight, disc = disc }
+		local radius = radiusFor(entry.model)
+		local anchor = entry.model.PrimaryPart or entry.model:FindFirstChildWhichIsA("BasePart")
+		if not (radius and anchor) then
+			return
+		end
+
+		if state.ShowRange then
+			if not entry.disc or not entry.disc.Parent then
+				entry.disc = createRangeDisc(radius, anchor.Position)
+			end
+		elseif entry.disc then
+			entry.disc:Destroy()
+			entry.disc = nil
+		end
 	end
 
 	local function destroyEntry(entry)
@@ -2054,8 +2066,11 @@ local AzureTrapESP = (function()
 				if entry then
 					destroyEntry(entry)
 				end
-				tracked[model] = createEntry(model)
+				entry = createEntry(model)
+				tracked[model] = entry
 			end
+
+			syncDisc(entry)
 		end
 
 		for model, entry in pairs(tracked) do
@@ -2067,7 +2082,7 @@ local AzureTrapESP = (function()
 	end
 
 	local function updateEntry(entry)
-		local within = state.Enabled and isWithinRange(entry.model)
+		local within = isWithinRange(entry.model)
 
 		if entry.highlight and entry.highlight.Parent then
 			entry.highlight.Enabled = within
@@ -2091,7 +2106,11 @@ local AzureTrapESP = (function()
 	end
 
 	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
-		if not state.Enabled then
+		-- No toggle of its own: the highlight follows Killer ESP.
+		if not KillerESP:IsEnabled() then
+			if next(tracked) ~= nil then
+				clearAll()
+			end
 			return
 		end
 
@@ -2110,18 +2129,24 @@ local AzureTrapESP = (function()
 
 	local api = {}
 
-	function api:SetEnabled(enabled)
-		state.Enabled = enabled
-		if enabled then
+	function api:SetShowRange(enabled)
+		state.ShowRange = enabled
+
+		if enabled and KillerESP:IsEnabled() then
 			pcall(scan)
-		else
-			clearAll()
+		elseif not enabled then
+			for _, entry in pairs(tracked) do
+				if entry.disc then
+					entry.disc:Destroy()
+					entry.disc = nil
+				end
+			end
 		end
+
 		applyAll()
 	end
 
 	function api.Unload()
-		state.Enabled = false
 		clearAll()
 
 		for _, conn in ipairs(connections) do
@@ -2300,11 +2325,11 @@ function Visuals.Build(Tab, ctx)
 	})
 
 	Tab:Toggle({
-		Title = "Azure Trap ESP",
-		Desc = "Highlight Azure's traps and show their detection radius.",
-		Value = false,
+		Title = "Azure Trap Range",
+		Desc = "Draw Azure's trap detection discs (shows while Killer ESP is on).",
+		Value = true,
 		Callback = function(value)
-			AzureTrapESP:SetEnabled(value)
+			AzureTrapESP:SetShowRange(value)
 		end,
 	})
 
