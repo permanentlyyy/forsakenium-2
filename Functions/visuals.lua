@@ -1993,6 +1993,90 @@ local AzureTrapESP = (function()
 		return disc
 	end
 
+	local function firstPart(model)
+		if model.PrimaryPart then
+			return model.PrimaryPart
+		end
+		for _, child in ipairs(model:GetChildren()) do
+			if child:IsA("BasePart") then
+				return child
+			end
+		end
+		return nil
+	end
+
+	-- Highest visible point of the model, so the label clears the plant instead of landing
+	-- inside it (Azure hides helper parts with Transparency 0.999).
+	local function modelTop(model)
+		local top = -math.huge
+		local anyPart = -math.huge
+
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local cframe = part.CFrame
+				local half = 0.5 * (
+					math.abs(cframe.RightVector.Y) * part.Size.X
+					+ math.abs(cframe.UpVector.Y) * part.Size.Y
+					+ math.abs(cframe.LookVector.Y) * part.Size.Z
+				)
+				local y = part.Position.Y + half
+
+				if y > anyPart then
+					anyPart = y
+				end
+				if part.Transparency < 0.99 and y > top then
+					top = y
+				end
+			end
+		end
+
+		if top == -math.huge then
+			return anyPart
+		end
+		return top
+	end
+
+	local function labelFor(model)
+		local name = string.lower(model.Name)
+		if string.find(name, "vine", 1, true) then
+			return "Vine"
+		end
+		if string.find(name, "bulb", 1, true) then
+			return "Ground Bulb"
+		end
+		return model.Name
+	end
+
+	local function createBillboard(part, text, offset)
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "ForsakeniumAzureTrapInfo"
+		billboard.Adornee = part
+		billboard.Size = UDim2.fromOffset(180, 18)
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = MAX_DISTANCE
+		billboard.ResetOnSpawn = false
+		billboard.LightInfluence = 0
+		billboard.Enabled = false
+		billboard.Parent = part
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Info"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamMedium
+		label.TextSize = 13
+		label.TextColor3 = state.Color
+		label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+		label.TextStrokeTransparency = 0.5
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextYAlignment = Enum.TextYAlignment.Center
+		label.Text = text
+		label.Parent = billboard
+
+		return billboard, label
+	end
+
 	local function style(highlight)
 		highlight.FillColor = state.Color
 		highlight.OutlineColor = state.Color
@@ -2007,7 +2091,37 @@ local AzureTrapESP = (function()
 		highlight.Adornee = model
 		highlight.Parent = model
 		style(highlight)
-		return { model = model, highlight = highlight }
+
+		-- Only the visible model gets a label; the invisible construct anchor would
+		-- otherwise show a second label for the same trap.
+		local billboard, label
+		if not model:GetAttribute("AzureConstruct") then
+			local part = firstPart(model)
+			if part then
+				billboard, label = createBillboard(part, labelFor(model), modelTop(model) - part.Position.Y + 1.2)
+			end
+		end
+
+		return { model = model, highlight = highlight, billboard = billboard, label = label }
+	end
+
+	-- Re-anchor the label if its part streamed away, and keep the offset clear of the top.
+	local function syncLabel(entry)
+		if entry.model:GetAttribute("AzureConstruct") then
+			return
+		end
+
+		local part = firstPart(entry.model)
+		if not part then
+			return
+		end
+
+		local offset = modelTop(entry.model) - part.Position.Y + 1.2
+		if not entry.billboard or not entry.billboard.Parent then
+			entry.billboard, entry.label = createBillboard(part, labelFor(entry.model), offset)
+		else
+			entry.billboard.StudsOffsetWorldSpace = Vector3.new(0, offset, 0)
+		end
 	end
 
 	-- Only the invisible construct anchor gets a disc, so the visible model
@@ -2039,6 +2153,9 @@ local AzureTrapESP = (function()
 		end
 		if entry.disc then
 			entry.disc:Destroy()
+		end
+		if entry.billboard then
+			entry.billboard:Destroy()
 		end
 	end
 
@@ -2072,6 +2189,7 @@ local AzureTrapESP = (function()
 			end
 
 			syncDisc(entry)
+			syncLabel(entry)
 		end
 
 		for model, entry in pairs(tracked) do
@@ -2097,6 +2215,14 @@ local AzureTrapESP = (function()
 			end
 			entry.disc.Color = state.Color
 			entry.disc.Transparency = within and RANGE_TRANSPARENCY or 1
+		end
+
+		if entry.billboard and entry.billboard.Parent then
+			entry.billboard.Enabled = within
+		end
+		if entry.label then
+			entry.label.Text = labelFor(entry.model)
+			entry.label.TextColor3 = state.Color
 		end
 	end
 
