@@ -2496,30 +2496,12 @@ local AzureTrapESP = (function()
 end)()
 
 -- Tracers. Each one draws a line from the bottom-centre of the screen to its target's
--- projected screen position. The lines are Roblox Frames inside a ScreenGui ordered
--- *below* the WindUI window, so the menu always covers them -- the executor's Drawing API
--- renders above every Roblox UI, so it cannot be layered underneath.
-local TracerContainer
+-- projected screen position using the executor's Drawing API (one line per target, reused
+-- from a pool). Tracers are independent of the ESP toggles and share the ESP colours.
+local TRACER_DRAWING = type(Drawing) == "table" and type(Drawing.new) == "function"
 
-local function tracerContainer()
-	if TracerContainer and TracerContainer.Parent then
-		return TracerContainer
-	end
-
-	local core = game:GetService("CoreGui")
-	local windui = core:FindFirstChild("WindUI", true)
-	local order = (windui and windui.DisplayOrder) or 0
-
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "ForsakeniumTracers"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = order - 1
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.Parent = (windui and windui.Parent) or core
-
-	TracerContainer = gui
-	return gui
+if not TRACER_DRAWING then
+	warn("[Forsakenium] Drawing API unavailable - tracers will not render")
 end
 
 local GENERATOR_TRACER_COLOR = Color3.fromHex("ffcc33")
@@ -2628,38 +2610,38 @@ end
 
 local function makeTracer(opts)
 	local state = { Enabled = false }
-	local frames = {}
+	local lines = {}
 	local connections = {}
 
-	local function frameAt(index)
-		local frame = frames[index]
-		if not frame then
-			local container = tracerContainer()
-			if not container then
+	local function lineAt(index)
+		if not TRACER_DRAWING then
+			return nil
+		end
+
+		local line = lines[index]
+		if not line then
+			local ok, created = pcall(function()
+				return Drawing.new("Line")
+			end)
+			if not ok or not created then
 				return nil
 			end
 
-			frame = Instance.new("Frame")
-			frame.Name = "ForsakeniumTracer"
-			frame.BorderSizePixel = 0
-			-- Rotation pivots around the frame centre, so the frame is positioned at the
-			-- midpoint of the line and anchored centrally; the ends then land exactly on
-			-- the screen origin and the target.
-			frame.AnchorPoint = Vector2.new(0.5, 0.5)
-			frame.BackgroundColor3 = Color3.new(1, 1, 1)
-			frame.Visible = false
-			frame.Parent = container
-			frames[index] = frame
+			line = created
+			line.Thickness = opts.thickness or 2
+			line.Transparency = 1
+			line.Visible = false
+			lines[index] = line
 		end
 
-		return frame
+		return line
 	end
 
 	local function hideFrom(index)
-		for i = index, #frames do
-			local frame = frames[i]
-			if frame then
-				frame.Visible = false
+		for i = index, #lines do
+			local line = lines[i]
+			if line then
+				line.Visible = false
 			end
 		end
 	end
@@ -2685,23 +2667,18 @@ local function makeTracer(opts)
 			if near then
 				local point = camera:WorldToViewportPoint(position)
 				if point.Z > 0 then
-					local frame = frameAt(index)
-					if frame then
+					local line = lineAt(index)
+					if line then
 						local colour = (type(target) == "table" and target.color) or opts.color
 						if type(colour) == "function" then
 							colour = colour()
 						end
 
-						local to = Vector2.new(point.X, point.Y)
-						local delta = to - origin
-						local length = delta.Magnitude
-						local mid = (origin + to) / 2
-
-						frame.BackgroundColor3 = colour or Color3.new(1, 1, 1)
-						frame.Position = UDim2.fromOffset(mid.X, mid.Y)
-						frame.Size = UDim2.fromOffset(math.max(length, 1), opts.thickness or 2)
-						frame.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-						frame.Visible = true
+						line.From = origin
+						line.To = Vector2.new(point.X, point.Y)
+						line.Color = colour or Color3.fromRGB(255, 255, 255)
+						line.Transparency = 1
+						line.Visible = true
 						index += 1
 					end
 				end
@@ -2731,20 +2708,12 @@ local function makeTracer(opts)
 		state.Enabled = false
 		hideFrom(1)
 
-		for _, frame in ipairs(frames) do
+		for _, line in ipairs(lines) do
 			pcall(function()
-				frame:Destroy()
+				line:Remove()
 			end)
 		end
-		table.clear(frames)
-
-		local container = TracerContainer
-		if container and container.Parent and #container:GetChildren() == 0 then
-			pcall(function()
-				container:Destroy()
-			end)
-			TracerContainer = nil
-		end
+		table.clear(lines)
 
 		for _, conn in ipairs(connections) do
 			pcall(function()

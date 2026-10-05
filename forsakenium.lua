@@ -20,11 +20,9 @@ local function clearLeftoverWindUI()
 			end)
 		end
 	end
-end
-
-clearLeftoverWindUI()
-
---// Sources
+--// Never let this abort the load: if CoreGui is unreachable from this context we would
+--// rather build the window than die before creating it.
+pcall(clearLeftoverWindUI)
 local REPO = "https://raw.githubusercontent.com/permanentlyyy/forsakenium-2/main"
 
 local Sources = {
@@ -185,5 +183,5 @@ _G.__Forsakenium = function()
 		Window:Destroy()
 	end)
 
-	clearLeftoverWindUI()
+	pcall(clearLeftoverWindUI)
 end
