@@ -29,7 +29,7 @@ if LegacyParkState then
 end
 
 local GOD = {
-	offsetTarget = -1000, -- where we want the reported hitbox to end up (below the map)
+	offsetTarget = 400, -- where we want the reported hitbox to end up (far out of melee reach)
 	offsetStep = 20, -- studs per packet -- small enough that each step looks like movement
 	interval = 0.05, -- resend this often, in seconds
 	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
