@@ -296,7 +296,10 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 			end
 
 			if not paused and ch:HasTag("Replicating") then
-				if speed <= godStillVelocity then
+				-- Also require no movement input. The teleport zeroes velocity, so a
+				-- velocity-only gate would keep re-triggering and pin you in place --
+				-- pressing a movement key has to be able to break out of it.
+				if not movingInput and speed <= godStillVelocity then
 					godStillFor += dt
 				else
 					godStillFor = 0
