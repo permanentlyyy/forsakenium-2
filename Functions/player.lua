@@ -29,8 +29,8 @@ if LegacyParkState then
 end
 
 local GOD = {
-	offsetTarget = 400, -- where we want the reported hitbox to end up (far out of melee reach)
-	offsetStep = 20, -- studs per packet -- small enough that each step looks like movement
+	offsetTarget = 200, -- where we want the reported hitbox to end up (out of melee reach)
+	offsetStep = 10, -- studs per packet -- ~200 studs/s, a believable falling speed
 	interval = 0.05, -- resend this often, in seconds
 	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
 }
@@ -77,6 +77,13 @@ local function godSendPacket(root)
 		local buf = CharRep.Serialize(cframe, root.AssemblyLinearVelocity)
 		if typeof(buf) == "buffer" and buffer.len(buf) >= 12 then
 			buffer.writef32(buf, 4, cframe.Position.Y + godOffset)
+
+			-- Report a velocity that matches the ramp, otherwise the server sees a position
+			-- that moved while velocity says we are standing still and drops it.
+			if buffer.len(buf) >= 30 then
+				local rampSpeed = GOD.offsetStep / GOD.interval
+				buffer.writef32(buf, 22, GOD.offsetTarget > 0 and rampSpeed or -rampSpeed)
+			end
 		end
 		originalFire(Network, "UpdateCharacterPosition", "UREMOTE_EVENT", buf)
 	end)
