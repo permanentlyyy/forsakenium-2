@@ -29,7 +29,7 @@ if LegacyParkState then
 end
 
 local GOD = {
-	fakeY = -1000, -- Y every spoofed position is written to
+	lift = 6, -- how many studs higher than the real position we report
 	interval = 0.1, -- resend the spoofed position this often, in seconds
 	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
 }
@@ -65,13 +65,15 @@ local function godGetParts()
 	return ch, hum, root
 end
 
--- Send the current position with Y forced to GOD.fakeY. X/Z stay real, so the server still
--- has a rough idea where we are but every hit resolves ~1000 studs below the map.
+-- Send the current position with Y lifted by GOD.lift. X/Z stay real, so the delta from our
+-- last packet stays small and plausible -- a wild value like -1000 gets rejected outright,
+-- but a few studs of offset still moves us out of the attacker's hitbox.
 local function godSendPacket(root)
 	pcall(function()
-		local buf = CharRep.Serialize(root.CFrame, root.AssemblyLinearVelocity)
+		local cframe = root.CFrame
+		local buf = CharRep.Serialize(cframe, root.AssemblyLinearVelocity)
 		if typeof(buf) == "buffer" and buffer.len(buf) >= 12 then
-			buffer.writef32(buf, 4, GOD.fakeY)
+			buffer.writef32(buf, 4, cframe.Position.Y + GOD.lift)
 		end
 		originalFire(Network, "UpdateCharacterPosition", "UREMOTE_EVENT", buf)
 	end)
