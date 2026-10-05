@@ -73,9 +73,10 @@ local function godGetParts()
 end
 
 local function godIsStill(hum, root)
-	-- Velocity only: the spoof/teleport fires when the character is completely stationary.
-	-- No floor/input requirement, so standing on a slope or a prop still counts.
-	return root.AssemblyLinearVelocity.Magnitude <= GOD.velThreshold
+	-- "Velocity is 0": Roblox never settles to a true float zero -- a resting character reads
+	-- a constant ~0.000832 here -- so this treats 0.000 at 3-decimal resolution as zero.
+	-- Any actual movement (>= 0.001) fails the check.
+	return math.floor(root.AssemblyLinearVelocity.Magnitude * 1000) == 0
 end
 
 local function godSendPacket(hum, root)
