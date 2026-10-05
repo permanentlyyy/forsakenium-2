@@ -29,7 +29,7 @@ if LegacyParkState then
 end
 
 local GOD = {
-	lift = -6, -- studs we report ourselves higher than the real position
+	lift = -18, -- studs we report ourselves higher than the real position
 	interval = 0.1, -- resend the spoofed position this often, in seconds
 	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
 }
