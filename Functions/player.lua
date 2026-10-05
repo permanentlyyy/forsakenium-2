@@ -260,7 +260,9 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 
 			local paused = root.Anchored or os.clock() < godExternalUntil
 
-			if godLastSafe and godStill and not paused and (godLastSafe.Y - pos.Y) > GOD.dropShield then
+			-- Teleport to the last safe spot whenever we are stationary -- no fall distance
+			-- required, so it fires while standing still instead of only after moving.
+			if godLastSafe and godStill and not paused then
 				root.AssemblyLinearVelocity = Vector3.zero
 				root.CFrame = CFrame.new(godLastSafe) * (root.CFrame - root.CFrame.Position)
 				pos = godLastSafe
@@ -280,6 +282,19 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 				godStillVelocity = math.max(godStillVelocity, speed)
 			end
 
+			-- Hitbox detection runs whether we are moving or not; only the spoof send and the
+			-- teleport wait for a still character.
+			local needs = false
+			local qh = ch:FindFirstChild("QueryHitbox")
+			if qh then
+				local qpos = qh.Position
+				local flatGap = (Vector3.new(qpos.X, 0, qpos.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
+				needs = (qpos - pos).Magnitude <= GOD.maxDist
+					and (flatGap <= GOD.hitboxNear
+						or math.abs(qpos.Y - GOD.fakeY) > 2
+						or flatGap > GOD.refreshDist)
+			end
+
 			if not paused and ch:HasTag("Replicating") then
 				if speed <= godStillVelocity then
 					godStillFor += dt
@@ -288,28 +303,12 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 				end
 				godStill = godStillFor >= GOD.stillTime
 
-				if godStillFor >= GOD.stillTime and os.clock() >= godHoldUntil then
-					local qh = ch:FindFirstChild("QueryHitbox")
-					local needs = true
-					if qh then
-						local qpos = qh.Position
-						local flatGap = (Vector3.new(qpos.X, 0, qpos.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
-						-- Refresh while the hitbox is near us, or once it has drifted off the
-						-- spoofed spot.
-						needs = (qpos - pos).Magnitude <= GOD.maxDist
-							and (flatGap <= GOD.hitboxNear
-								or math.abs(qpos.Y - GOD.fakeY) > 2
-								or flatGap > GOD.refreshDist)
-					end
-					if needs then
-						godAcc += dt
-						if godAcc >= GOD.interval then
-							godAcc = 0
-							godSendPacket(hum, root)
-							godHoldUntil = os.clock() + 0.3
-						end
-					else
+				if needs and godStillFor >= GOD.stillTime and os.clock() >= godHoldUntil then
+					godAcc += dt
+					if godAcc >= GOD.interval then
 						godAcc = 0
+						godSendPacket(hum, root)
+						godHoldUntil = os.clock() + 0.3
 					end
 				else
 					godAcc = 0
