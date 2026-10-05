@@ -32,12 +32,14 @@ local GOD = {
 	fakeY = -1000,
 	interval = 0,
 	stillTime = 0,
-	velThreshold = 0, -- teleport/spoof only while the character is completely stationary
 	stopCooldown = 0,
 	tpPause = 0.25,
 	dropShield = 40,
 	refreshDist = 12,
 	maxDist = 250,
+	hitboxNear = 15, -- refresh the spoof while the hitbox is this close
+	restSampleCap = 1, -- only learn a resting velocity below this
+	restSampleFloor = 0.001,
 }
 
 local originalFire = (function()
@@ -51,6 +53,9 @@ local godAcc, godStillFor, godMotionCooldown = 0, 0, 0
 local godLastPos, godLastSafe, godLastChar = nil, nil, nil
 local godExternalUntil, godHoldUntil = 0, 0
 local godStill = false
+-- Learned standing-still velocity. Roblox never settles to a true float zero, so instead of
+-- guessing a constant this tracks whatever this character actually reads at rest.
+local godStillVelocity = 0.001
 
 Network.FireServerConnection = function(self, name, typ, ...)
 	if GodState.Enabled and name == "UpdateCharacterPosition" then
@@ -73,10 +78,8 @@ local function godGetParts()
 end
 
 local function godIsStill(hum, root)
-	-- "Velocity is 0": Roblox never settles to a true float zero -- a resting character reads
-	-- a constant ~0.000832 here -- so this treats 0.000 at 3-decimal resolution as zero.
-	-- Any actual movement (>= 0.001) fails the check.
-	return math.floor(root.AssemblyLinearVelocity.Magnitude * 1000) == 0
+	-- Compared against the learned resting velocity for this character.
+	return root.AssemblyLinearVelocity.Magnitude <= godStillVelocity
 end
 
 local function godSendPacket(hum, root)
@@ -205,6 +208,7 @@ function Player:SetGodMode(enabled)
 		godMotionCooldown = 0
 		godExternalUntil, godHoldUntil = 0, 0
 		godStill = false
+		godStillVelocity = GOD.restSampleFloor
 	end
 end
 
@@ -245,6 +249,7 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 				godLastPos, godLastSafe = nil, nil
 				godStillFor, godAcc = 0, 0
 				godMotionCooldown = GOD.stopCooldown
+				godStillVelocity = GOD.restSampleFloor
 			end
 
 			local pos = root.Position
@@ -265,11 +270,18 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 			end
 
 			local movingInput = hum.MoveDirection.Magnitude > 0.01
+			local speed = root.AssemblyLinearVelocity.Magnitude
 			godMotionCooldown = movingInput and GOD.stopCooldown or (godMotionCooldown - dt)
 
-			-- Gate is purely the velocity check inside godIsStill now.
+			-- Learn what "standing still" actually reads as on this character: while there is
+			-- no movement input and the speed is low, keep the highest value seen and treat
+			-- that as zero.
+			if not movingInput and speed <= GOD.restSampleCap then
+				godStillVelocity = math.max(godStillVelocity, speed)
+			end
+
 			if not paused and ch:HasTag("Replicating") then
-				if godIsStill(hum, root) then
+				if speed <= godStillVelocity then
 					godStillFor += dt
 				else
 					godStillFor = 0
@@ -281,9 +293,13 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 					local needs = true
 					if qh then
 						local qpos = qh.Position
+						local flatGap = (Vector3.new(qpos.X, 0, qpos.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
+						-- Refresh while the hitbox is near us, or once it has drifted off the
+						-- spoofed spot.
 						needs = (qpos - pos).Magnitude <= GOD.maxDist
-							and (math.abs(qpos.Y - GOD.fakeY) > 2
-								or (Vector3.new(qpos.X, 0, qpos.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude > GOD.refreshDist)
+							and (flatGap <= GOD.hitboxNear
+								or math.abs(qpos.Y - GOD.fakeY) > 2
+								or flatGap > GOD.refreshDist)
 					end
 					if needs then
 						godAcc += dt
