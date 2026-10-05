@@ -404,6 +404,10 @@ local function makeESP(opts)
 		return state.Enabled
 	end
 
+	function api:GetColor()
+		return state.Color
+	end
+
 	function api:SetColor(color)
 		state.Color = color
 		applyAll()
@@ -2300,6 +2304,323 @@ local AzureTrapESP = (function()
 	return api
 end)()
 
+-- Tracers. Each one draws a line from the bottom-centre of the screen to its target's
+-- projected screen position using the executor's Drawing API (one line per target, reused
+-- from a pool). Tracers are independent of the ESP toggles and share the ESP colours.
+local TRACER_DRAWING = type(Drawing) == "table" and type(Drawing.new) == "function"
+
+if not TRACER_DRAWING then
+	warn("[Forsakenium] Drawing API unavailable - tracers will not render")
+end
+
+local TRAP_TRACER_COLOR = Color3.fromRGB(191, 255, 191)
+local GENERATOR_TRACER_COLOR = Color3.fromHex("ffcc33")
+
+local function tracerCharacterPosition(model)
+	local part = model.PrimaryPart or model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+	return part and part.Position or nil
+end
+
+local function tracerCharacters(folderName)
+	local out = {}
+	local players = workspace:FindFirstChild("Players")
+	local folder = players and players:FindFirstChild(folderName)
+	if not folder then
+		return out
+	end
+
+	for _, model in ipairs(folder:GetChildren()) do
+		if model:IsA("Model") and model ~= LocalPlayer.Character then
+			local position = tracerCharacterPosition(model)
+			if position then
+				table.insert(out, position)
+			end
+		end
+	end
+
+	return out
+end
+
+local function tracerGenerators()
+	local out = {}
+	local map = workspace:FindFirstChild("Map")
+	local ingame = map and map:FindFirstChild("Ingame")
+	local decor = ingame and ingame:FindFirstChild("Map")
+	if not decor then
+		return out
+	end
+
+	for _, model in ipairs(decor:GetChildren()) do
+		if model:IsA("Model") and model:GetAttribute("GeneratorProfile") ~= "Fake" then
+			local progress = model:FindFirstChild("Progress")
+			if progress and progress.Value < 100 then
+				local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+				if part then
+					table.insert(out, part.Position)
+				end
+			end
+		end
+	end
+
+	return out
+end
+
+local function tracerToolHeld(tool)
+	local node = tool.Parent
+	while node and node ~= workspace do
+		if node:IsA("Model") and node:FindFirstChildOfClass("Humanoid") then
+			return true
+		end
+		node = node.Parent
+	end
+	return false
+end
+
+local function tracerItemColor(name)
+	local lower = string.lower(name)
+	if string.find(lower, "medkit", 1, true) then
+		return Color3.fromRGB(255, 255, 255)
+	end
+	if string.find(lower, "cola", 1, true) then
+		return Color3.fromRGB(205, 133, 63)
+	end
+	return Color3.fromRGB(120, 200, 255)
+end
+
+local function tracerItems()
+	local out = {}
+	if type(workspace.QueryDescendants) ~= "function" then
+		return out
+	end
+
+	local ok, tools = pcall(function()
+		return workspace:QueryDescendants("Tool")
+	end)
+	if not ok or not tools then
+		return out
+	end
+
+	for _, tool in ipairs(tools) do
+		if not tracerToolHeld(tool) then
+			local part
+			for _, child in ipairs(tool:GetDescendants()) do
+				if child:IsA("BasePart") then
+					part = child
+					break
+				end
+			end
+			if part then
+				table.insert(out, { position = part.Position, color = tracerItemColor(tool.Name) })
+			end
+		end
+	end
+
+	return out
+end
+
+local function tracerTraps(keyword)
+	local out = {}
+	local map = workspace:FindFirstChild("Map")
+	if not map then
+		return out
+	end
+
+	local containers = {}
+	local ingame = map:FindFirstChild("Ingame")
+	if ingame then
+		table.insert(containers, ingame)
+		local decor = ingame:FindFirstChild("Map")
+		if decor then
+			table.insert(containers, decor)
+		end
+	end
+
+	local lobby = map:FindFirstChild("Lobby")
+	if lobby then
+		table.insert(containers, lobby)
+		local interactive = lobby:FindFirstChild("Interactive")
+		if interactive then
+			table.insert(containers, interactive)
+		end
+	end
+
+	for _, container in ipairs(containers) do
+		for _, model in ipairs(container:GetChildren()) do
+			if model:IsA("Model")
+				and string.find(string.lower(model.Name), keyword, 1, true)
+				and not model:HasTag("SurvivorConstruct")
+				and model:GetAttribute("Team") ~= "Survivors" then
+				local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+				if part then
+					table.insert(out, part.Position)
+				end
+			end
+		end
+	end
+
+	return out
+end
+
+local function makeTracer(opts)
+	local state = { Enabled = false }
+	local lines = {}
+	local connections = {}
+
+	local function lineAt(index)
+		if not TRACER_DRAWING then
+			return nil
+		end
+
+		local line = lines[index]
+		if not line then
+			local ok, created = pcall(function()
+				return Drawing.new("Line")
+			end)
+			if not ok or not created then
+				return nil
+			end
+
+			line = created
+			line.Thickness = opts.thickness or 2
+			line.Transparency = 1
+			line.Visible = false
+			lines[index] = line
+		end
+
+		return line
+	end
+
+	local function hideFrom(index)
+		for i = index, #lines do
+			local line = lines[i]
+			if line then
+				line.Visible = false
+			end
+		end
+	end
+
+	local function draw()
+		local camera = workspace.CurrentCamera
+		if not camera then
+			hideFrom(1)
+			return
+		end
+
+		local viewport = camera.ViewportSize
+		local origin = Vector2.new(viewport.X / 2, viewport.Y)
+		local reference = getReferencePosition()
+		local index = 1
+
+		for _, target in ipairs(opts.collect()) do
+			local position = typeof(target) == "Vector3" and target or target.position
+
+			local near = position ~= nil
+				and (reference == nil or (position - reference).Magnitude <= MAX_DISTANCE)
+
+			if near then
+				local point = camera:WorldToViewportPoint(position)
+				if point.Z > 0 then
+					local line = lineAt(index)
+					if line then
+						local colour = (type(target) == "table" and target.color) or opts.color
+						if type(colour) == "function" then
+							colour = colour()
+						end
+
+						line.From = origin
+						line.To = Vector2.new(point.X, point.Y)
+						line.Color = colour or Color3.fromRGB(255, 255, 255)
+						line.Transparency = 1
+						line.Visible = true
+						index += 1
+					end
+				end
+			end
+		end
+
+		hideFrom(index)
+	end
+
+	table.insert(connections, RunService.RenderStepped:Connect(function()
+		if not state.Enabled then
+			return
+		end
+		pcall(draw)
+	end))
+
+	local api = {}
+
+	function api:SetEnabled(enabled)
+		state.Enabled = enabled
+		if not enabled then
+			hideFrom(1)
+		end
+	end
+
+	function api.Unload()
+		state.Enabled = false
+		hideFrom(1)
+
+		for _, line in ipairs(lines) do
+			pcall(function()
+				line:Remove()
+			end)
+		end
+		table.clear(lines)
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end
+
+local KillerTracer = makeTracer({
+	collect = function()
+		return tracerCharacters("Killers")
+	end,
+	color = function()
+		return KillerESP:GetColor()
+	end,
+})
+
+local SurvivorTracer = makeTracer({
+	collect = function()
+		return tracerCharacters("Survivors")
+	end,
+	color = function()
+		return SurvivorESP:GetColor()
+	end,
+})
+
+local GeneratorTracer = makeTracer({
+	collect = tracerGenerators,
+	color = GENERATOR_TRACER_COLOR,
+})
+
+local ItemTracer = makeTracer({
+	collect = tracerItems,
+	color = Color3.fromRGB(120, 200, 255),
+})
+
+local TripwireTracer = makeTracer({
+	collect = function()
+		return tracerTraps("tripwire")
+	end,
+	color = TRAP_TRACER_COLOR,
+})
+
+local TripmineTracer = makeTracer({
+	collect = function()
+		return tracerTraps("tripmine")
+	end,
+	color = TRAP_TRACER_COLOR,
+})
+
 function Visuals.Build(Tab, ctx)
 	Tab:Section({ Title = "Killer", Icon = "skull", TextSize = 15 })
 
@@ -2467,7 +2788,7 @@ function Visuals.Build(Tab, ctx)
 	Tab:Toggle({
 		Title = "Azure Trap Range",
 		Desc = "Draw Azure's trap detection discs (shows while Killer ESP is on).",
-		Value = true,
+		Value = false,
 		Callback = function(value)
 			AzureTrapESP:SetShowRange(value)
 		end,
@@ -2479,36 +2800,54 @@ function Visuals.Build(Tab, ctx)
 		Title = "Killer Tracer",
 		Desc = "Draw a tracer to the killer.",
 		Value = false,
+		Callback = function(value)
+			KillerTracer:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Survivor Tracer",
 		Desc = "Draw tracers to survivors.",
 		Value = false,
+		Callback = function(value)
+			SurvivorTracer:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Generator Tracer",
 		Desc = "Draw tracers to generators.",
 		Value = false,
+		Callback = function(value)
+			GeneratorTracer:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Item Tracer",
 		Desc = "Draw tracers to items.",
 		Value = false,
+		Callback = function(value)
+			ItemTracer:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Tripwire Tracer",
 		Desc = "Draw tracers to tripwires.",
 		Value = false,
+		Callback = function(value)
+			TripwireTracer:SetEnabled(value)
+		end,
 	})
 
 	Tab:Toggle({
 		Title = "Subspace Tripmine Tracer",
 		Desc = "Draw tracers to subspace tripmines.",
 		Value = false,
+		Callback = function(value)
+			TripmineTracer:SetEnabled(value)
+		end,
 	})
 end
 
@@ -2523,6 +2862,12 @@ function Visuals.Unload()
 	AzureTrapESP.Unload()
 	JohnDoeShadowESP.Unload()
 	CoolkiddMinionESP.Unload()
+	KillerTracer.Unload()
+	SurvivorTracer.Unload()
+	GeneratorTracer.Unload()
+	ItemTracer.Unload()
+	TripwireTracer.Unload()
+	TripmineTracer.Unload()
 end
 
 return Visuals
