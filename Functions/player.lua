@@ -29,9 +29,8 @@ if LegacyParkState then
 end
 
 local GOD = {
-	offsetTarget = 200, -- where we want the reported hitbox to end up (out of melee reach)
-	offsetStep = 10, -- studs per packet -- ~200 studs/s, a believable falling speed
-	interval = 0.05, -- resend this often, in seconds
+	lift = 6, -- studs we report ourselves higher than the real position
+	interval = 0.1, -- resend the spoofed position this often, in seconds
 	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
 }
 
@@ -43,7 +42,6 @@ local originalFire = (function()
 end)()
 
 local godClock = 0
-local godOffset = 0
 
 Network.FireServerConnection = function(self, name, typ, ...)
 	if GodState.Enabled and name == "UpdateCharacterPosition" then
@@ -67,23 +65,14 @@ local function godGetParts()
 	return ch, hum, root
 end
 
--- Send the current position with Y offset by godOffset. X/Z stay real and the offset walks
--- toward its target one small step per packet, so every packet's delta looks like ordinary
--- movement. An instant jump to -1000 gets rejected; a gradual one is accepted, and it parks
--- the hitbox far below the map where it can neither be seen nor reached.
+-- Send the current position with Y raised by GOD.lift. X/Z stay real; the small upward
+-- offset puts the reported hitbox out of a normal swing without looking like a teleport.
 local function godSendPacket(root)
 	pcall(function()
 		local cframe = root.CFrame
 		local buf = CharRep.Serialize(cframe, root.AssemblyLinearVelocity)
 		if typeof(buf) == "buffer" and buffer.len(buf) >= 12 then
-			buffer.writef32(buf, 4, cframe.Position.Y + godOffset)
-
-			-- Report a velocity that matches the ramp, otherwise the server sees a position
-			-- that moved while velocity says we are standing still and drops it.
-			if buffer.len(buf) >= 30 then
-				local rampSpeed = GOD.offsetStep / GOD.interval
-				buffer.writef32(buf, 22, GOD.offsetTarget > 0 and rampSpeed or -rampSpeed)
-			end
+			buffer.writef32(buf, 4, cframe.Position.Y + GOD.lift)
 		end
 		originalFire(Network, "UpdateCharacterPosition", "UREMOTE_EVENT", buf)
 	end)
@@ -202,7 +191,6 @@ end
 function Player:SetGodMode(enabled)
 	GodState.Enabled = enabled
 	godClock = 0
-	godOffset = 0
 
 	if enabled then
 		-- Spoof straight away instead of waiting for the next tick.
@@ -245,18 +233,6 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 	end
 	godClock = 0
 
-	-- Walk the offset toward its target so each packet is a small, believable step instead
-	-- of an impossible jump.
-	if godOffset ~= GOD.offsetTarget then
-		local direction = GOD.offsetTarget > godOffset and 1 or -1
-		godOffset = godOffset + direction * GOD.offsetStep
-		local overshot = (direction > 0 and godOffset > GOD.offsetTarget)
-			or (direction < 0 and godOffset < GOD.offsetTarget)
-		if overshot then
-			godOffset = GOD.offsetTarget
-		end
-	end
-
 	pcall(function()
 		local ch, hum, root = godGetParts()
 		if root then
@@ -271,8 +247,6 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
 	if not GodState.Enabled then
 		return
 	end
-	-- Start the offset from scratch so a fresh character ramps up again.
-	godOffset = 0
 	task.delay(GOD.respawnDelay, godSpoofNow)
 end))
 
