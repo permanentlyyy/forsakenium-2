@@ -29,17 +29,9 @@ if LegacyParkState then
 end
 
 local GOD = {
-	fakeY = -1000,
-	interval = 0,
-	stillTime = 0,
-	stopCooldown = 0,
-	tpPause = 0.25,
-	dropShield = 40,
-	refreshDist = 12,
-	maxDist = 250,
-	hitboxNear = 15, -- refresh the spoof while the hitbox is this close
-	restSampleCap = 1, -- only learn a resting velocity below this
-	restSampleFloor = 0.001,
+	fakeY = -1000, -- Y every spoofed position is written to
+	interval = 0.1, -- resend the spoofed position this often, in seconds
+	respawnDelay = 0.35, -- let a fresh character come up before spoofing again
 }
 
 local originalFire = (function()
@@ -49,16 +41,12 @@ local originalFire = (function()
 	return env.__ForsakenOriginalFire
 end)()
 
-local godAcc, godStillFor, godMotionCooldown = 0, 0, 0
-local godLastPos, godLastSafe, godLastChar = nil, nil, nil
-local godExternalUntil, godHoldUntil = 0, 0
-local godStill = false
--- Learned standing-still velocity. Roblox never settles to a true float zero, so instead of
--- guessing a constant this tracks whatever this character actually reads at rest.
-local godStillVelocity = 0.001
+local godClock = 0
 
 Network.FireServerConnection = function(self, name, typ, ...)
 	if GodState.Enabled and name == "UpdateCharacterPosition" then
+		-- While God Mode is on the real position never goes out; only our spoofed
+		-- packet below is sent.
 		return
 	end
 	return originalFire(self, name, typ, ...)
@@ -77,21 +65,24 @@ local function godGetParts()
 	return ch, hum, root
 end
 
-local function godIsStill(hum, root)
-	-- Compared against the learned resting velocity for this character.
-	return root.AssemblyLinearVelocity.Magnitude <= godStillVelocity
-end
-
-local function godSendPacket(hum, root)
-	if not godIsStill(hum, root) then
-		return
-	end
+-- Send the current position with Y forced to GOD.fakeY. X/Z stay real, so the server still
+-- has a rough idea where we are but every hit resolves ~1000 studs below the map.
+local function godSendPacket(root)
 	pcall(function()
 		local buf = CharRep.Serialize(root.CFrame, root.AssemblyLinearVelocity)
 		if typeof(buf) == "buffer" and buffer.len(buf) >= 12 then
 			buffer.writef32(buf, 4, GOD.fakeY)
 		end
 		originalFire(Network, "UpdateCharacterPosition", "UREMOTE_EVENT", buf)
+	end)
+end
+
+local function godSpoofNow()
+	pcall(function()
+		local ch, hum, root = godGetParts()
+		if root then
+			godSendPacket(root)
+		end
 	end)
 end
 
@@ -198,17 +189,11 @@ end
 
 function Player:SetGodMode(enabled)
 	GodState.Enabled = enabled
+	godClock = 0
 
 	if enabled then
-		-- Start from a clean slate. Previously these only reset when the character changed,
-		-- so enabling while already standing still could be held back by stale state from
-		-- earlier movement (the jump/tp pause and the send hold-off).
-		godLastChar, godLastPos, godLastSafe = nil, nil, nil
-		godStillFor, godAcc = 0, 0
-		godMotionCooldown = 0
-		godExternalUntil, godHoldUntil = 0, 0
-		godStill = false
-		godStillVelocity = GOD.restSampleFloor
+		-- Spoof straight away instead of waiting for the next tick.
+		godSpoofNow()
 	end
 end
 
@@ -237,92 +222,31 @@ function Player:SetSilentFootsteps(enabled)
 end
 
 table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
-	if GodState.Enabled then
-		pcall(function()
-			local ch, hum, root = godGetParts()
-			if not ch then
-				return
-			end
-
-			if ch ~= godLastChar then
-				godLastChar = ch
-				godLastPos, godLastSafe = nil, nil
-				godStillFor, godAcc = 0, 0
-				godMotionCooldown = GOD.stopCooldown
-				godStillVelocity = GOD.restSampleFloor
-			end
-
-			local pos = root.Position
-			if godLastPos and (pos - godLastPos).Magnitude > 4 then
-				godExternalUntil = os.clock() + GOD.tpPause
-			end
-			godLastPos = pos
-
-			local paused = root.Anchored or os.clock() < godExternalUntil
-
-			-- Teleport to the last safe spot whenever we are stationary -- no fall distance
-			-- required, so it fires while standing still instead of only after moving.
-			if godLastSafe and godStill and not paused then
-				root.AssemblyLinearVelocity = Vector3.zero
-				root.CFrame = CFrame.new(godLastSafe) * (root.CFrame - root.CFrame.Position)
-				pos = godLastSafe
-			end
-			if not paused then
-				godLastSafe = pos
-			end
-
-			local movingInput = hum.MoveDirection.Magnitude > 0.01
-			local speed = root.AssemblyLinearVelocity.Magnitude
-			godMotionCooldown = movingInput and GOD.stopCooldown or (godMotionCooldown - dt)
-
-			-- Learn what "standing still" actually reads as on this character: while there is
-			-- no movement input and the speed is low, keep the highest value seen and treat
-			-- that as zero.
-			if not movingInput and speed <= GOD.restSampleCap then
-				godStillVelocity = math.max(godStillVelocity, speed)
-			end
-
-			-- Hitbox detection runs whether we are moving or not; only the spoof send and the
-			-- teleport wait for a still character.
-			local needs = false
-			local qh = ch:FindFirstChild("QueryHitbox")
-			if qh then
-				local qpos = qh.Position
-				local flatGap = (Vector3.new(qpos.X, 0, qpos.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
-				needs = (qpos - pos).Magnitude <= GOD.maxDist
-					and (flatGap <= GOD.hitboxNear
-						or math.abs(qpos.Y - GOD.fakeY) > 2
-						or flatGap > GOD.refreshDist)
-			end
-
-			if not paused and ch:HasTag("Replicating") then
-				-- Also require no movement input. The teleport zeroes velocity, so a
-				-- velocity-only gate would keep re-triggering and pin you in place --
-				-- pressing a movement key has to be able to break out of it.
-				if not movingInput and speed <= godStillVelocity then
-					godStillFor += dt
-				else
-					godStillFor = 0
-				end
-				godStill = godStillFor >= GOD.stillTime
-
-				if needs and godStillFor >= GOD.stillTime and os.clock() >= godHoldUntil then
-					godAcc += dt
-					if godAcc >= GOD.interval then
-						godAcc = 0
-						godSendPacket(hum, root)
-						godHoldUntil = os.clock() + 0.3
-					end
-				else
-					godAcc = 0
-				end
-			else
-				godStillFor = 0
-				godStill = false
-				godAcc = 0
-			end
-		end)
+	if not GodState.Enabled then
+		return
 	end
+
+	godClock += dt
+	if godClock < GOD.interval then
+		return
+	end
+	godClock = 0
+
+	pcall(function()
+		local ch, hum, root = godGetParts()
+		if root then
+			godSendPacket(root)
+		end
+	end)
+end))
+
+-- Re-spoof as soon as a new character exists, so respawns and new rounds are covered
+-- without having to toggle God Mode again.
+table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
+	if not GodState.Enabled then
+		return
+	end
+	task.delay(GOD.respawnDelay, godSpoofNow)
 end))
 
 table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function(char)
