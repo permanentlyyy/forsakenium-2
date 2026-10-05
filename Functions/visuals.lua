@@ -2642,7 +2642,10 @@ local function makeTracer(opts)
 			frame = Instance.new("Frame")
 			frame.Name = "ForsakeniumTracer"
 			frame.BorderSizePixel = 0
-			frame.AnchorPoint = Vector2.new(0, 0.5)
+			-- Rotation pivots around the frame centre, so the frame is positioned at the
+			-- midpoint of the line and anchored centrally; the ends then land exactly on
+			-- the screen origin and the target.
+			frame.AnchorPoint = Vector2.new(0.5, 0.5)
 			frame.BackgroundColor3 = Color3.new(1, 1, 1)
 			frame.Visible = false
 			frame.Parent = container
@@ -2692,9 +2695,10 @@ local function makeTracer(opts)
 						local to = Vector2.new(point.X, point.Y)
 						local delta = to - origin
 						local length = delta.Magnitude
+						local mid = (origin + to) / 2
 
 						frame.BackgroundColor3 = colour or Color3.new(1, 1, 1)
-						frame.Position = UDim2.fromOffset(origin.X, origin.Y)
+						frame.Position = UDim2.fromOffset(mid.X, mid.Y)
 						frame.Size = UDim2.fromOffset(math.max(length, 1), opts.thickness or 2)
 						frame.Rotation = math.deg(math.atan2(delta.Y, delta.X))
 						frame.Visible = true
