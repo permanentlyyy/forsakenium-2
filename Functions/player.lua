@@ -201,6 +201,17 @@ end
 
 function Player:SetGodMode(enabled)
 	GodState.Enabled = enabled
+
+	if enabled then
+		-- Start from a clean slate. Previously these only reset when the character changed,
+		-- so enabling while already standing still could be held back by stale state from
+		-- earlier movement (the jump/tp pause and the send hold-off).
+		godLastChar, godLastPos, godLastSafe = nil, nil, nil
+		godStillFor, godAcc = 0, 0
+		godMotionCooldown = 0
+		godExternalUntil, godHoldUntil = 0, 0
+		godStill = false
+	end
 end
 
 function Player:SetInvisibility(enabled)
