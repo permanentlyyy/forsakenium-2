@@ -11,13 +11,50 @@ end
 --// WindUI lives in CoreGui. A run that was stopped mid-way (or whose handler got
 --// replaced) can leave extra WindUI screens behind, so clear every one before this run
 --// creates its own. This keeps exactly one window alive no matter how often we reload.
+--// CoreGui lookups can come back nil from inside a loadstring'd entry (that is what made
+--// the old cleanup fail silently and let windows stack), so try every root we can reach.
+local function coreUiRoots()
+	local roots = {}
+
+	for _, getter in ipairs({
+		function()
+			return gethui()
+		end,
+		function()
+			return game:GetService("CoreGui")
+		end,
+		function()
+			return game.CoreGui
+		end,
+	}) do
+		local ok, root = pcall(getter)
+		if ok and root then
+			table.insert(roots, root)
+		end
+	end
+
+	return roots
+end
+
 local function clearLeftoverWindUI()
-	local core = game:GetService("CoreGui")
-	for _, descendant in ipairs(core:GetDescendants()) do
-		if descendant:IsA("ScreenGui") and descendant.Name == "WindUI" then
-			pcall(function()
-				descendant:Destroy()
-			end)
+	local seen = {}
+
+	for _, root in ipairs(coreUiRoots()) do
+		local ok, descendants = pcall(function()
+			return root:GetDescendants()
+		end)
+
+		if ok and descendants then
+			for _, descendant in ipairs(descendants) do
+				if descendant:IsA("ScreenGui")
+					and descendant.Name == "WindUI"
+					and not seen[descendant] then
+					seen[descendant] = true
+					pcall(function()
+						descendant:Destroy()
+					end)
+				end
+			end
 		end
 	end
 end
