@@ -725,6 +725,10 @@ local GeneratorESP = (function()
 		applyAll()
 	end
 
+	function api:IsEnabled()
+		return state.Enabled
+	end
+
 	function api:SetColor(color)
 		state.Color = color
 		for _, entry in pairs(tracked) do
@@ -1078,6 +1082,10 @@ local ItemESP = (function()
 			clearAll()
 		end
 		applyAll()
+	end
+
+	function api:IsEnabled()
+		return state.Enabled
 	end
 
 	function api.Unload()
@@ -1519,6 +1527,10 @@ local GraffitiESP = (function()
 			clearAll()
 		end
 		applyAll()
+	end
+
+	function api:IsEnabled()
+		return state.Enabled
 	end
 
 	function api.Unload()
@@ -2692,6 +2704,13 @@ local function makeTracer(opts)
 		if not state.Enabled then
 			return
 		end
+
+		-- Only trace while the matching ESP is on.
+		if opts.isActive and not opts.isActive() then
+			hideFrom(1)
+			return
+		end
+
 		pcall(draw)
 	end))
 
@@ -2733,6 +2752,9 @@ local KillerTracer = makeTracer({
 	color = function()
 		return KillerESP:GetColor()
 	end,
+	isActive = function()
+		return KillerESP:IsEnabled()
+	end,
 })
 
 local SurvivorTracer = makeTracer({
@@ -2742,16 +2764,25 @@ local SurvivorTracer = makeTracer({
 	color = function()
 		return SurvivorESP:GetColor()
 	end,
+	isActive = function()
+		return SurvivorESP:IsEnabled()
+	end,
 })
 
 local GeneratorTracer = makeTracer({
 	collect = tracerGenerators,
 	color = GENERATOR_TRACER_COLOR,
+	isActive = function()
+		return GeneratorESP:IsEnabled()
+	end,
 })
 
 local ItemTracer = makeTracer({
 	collect = tracerItems,
 	color = Color3.fromRGB(120, 200, 255),
+	isActive = function()
+		return ItemESP:IsEnabled()
+	end,
 })
 
 function Visuals.Build(Tab, ctx)
