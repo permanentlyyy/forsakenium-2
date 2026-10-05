@@ -1903,6 +1903,197 @@ local CoolkiddMinionESP = (function()
 	return api
 end)()
 
+-- 1x1x1x1 minions. Same approach as the c00lkidd ones: their spawned models vary in name,
+-- so this matches minion rigs structurally instead of by name -- every Model in the round
+-- area with a Humanoid that is not a player or a survivor construct. Green, and it follows
+-- Killer ESP like the other killer-side helpers (no toggle of its own).
+local OnesMinionESP = (function()
+	local COLOR = Color3.fromRGB(0, 255, 0)
+
+	local tracked = {}
+	local connections = {}
+	local scanClock = 0
+
+	local function isOnesKiller()
+		local players = workspace:FindFirstChild("Players")
+		local killers = players and players:FindFirstChild("Killers")
+		if not killers then
+			return false
+		end
+
+		for _, character in ipairs(killers:GetChildren()) do
+			local name = string.lower(character.Name):gsub("%s", "")
+			if string.find(name, "1x1x1x1", 1, true) then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	local function isMinionModel(model)
+		if not model:IsA("Model") then
+			return false
+		end
+		if not model:FindFirstChildOfClass("Humanoid") then
+			return false
+		end
+		if model:IsDescendantOf(workspace.Players) then
+			return false
+		end
+		if model:HasTag("SurvivorConstruct") then
+			return false
+		end
+		if model:GetAttribute("Team") == "Survivors" then
+			return false
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		if map then
+			local lobby = map:FindFirstChild("Lobby")
+			if lobby and model:IsDescendantOf(lobby) then
+				return false
+			end
+
+			local ingame = map:FindFirstChild("Ingame")
+			local decor = ingame and ingame:FindFirstChild("Map")
+			if decor and model:IsDescendantOf(decor) then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	local function collectMinionModels()
+		local models = {}
+
+		local function scan(container)
+			for _, child in ipairs(container:GetChildren()) do
+				if isMinionModel(child) then
+					table.insert(models, child)
+				elseif child:IsA("Folder") then
+					for _, nested in ipairs(child:GetChildren()) do
+						if isMinionModel(nested) then
+							table.insert(models, nested)
+						end
+					end
+				end
+			end
+		end
+
+		local map = workspace:FindFirstChild("Map")
+		local ingame = map and map:FindFirstChild("Ingame")
+		if ingame then
+			scan(ingame)
+		end
+
+		local misc = workspace:FindFirstChild("Misc")
+		if misc then
+			scan(misc)
+		end
+
+		return models
+	end
+
+	local function style(highlight)
+		highlight.FillColor = COLOR
+		highlight.OutlineColor = COLOR
+		highlight.FillTransparency = 0.7
+		highlight.OutlineTransparency = 0.3
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	local function createEntry(model)
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "Forsakenium1xMinionESP"
+		highlight.Adornee = model
+		highlight.Parent = model
+		style(highlight)
+		return { model = model, highlight = highlight }
+	end
+
+	local function destroyEntry(entry)
+		if entry.highlight then
+			entry.highlight:Destroy()
+		end
+	end
+
+	local function clearAll()
+		for model, entry in pairs(tracked) do
+			destroyEntry(entry)
+			tracked[model] = nil
+		end
+	end
+
+	local function updateEntry(entry)
+		if entry.highlight and entry.highlight.Parent then
+			entry.highlight.Enabled = isWithinRange(entry.model)
+		end
+	end
+
+	local function scan()
+		local seen = {}
+
+		for _, model in ipairs(collectMinionModels()) do
+			seen[model] = true
+
+			local entry = tracked[model]
+			local broken = entry and (not entry.highlight or not entry.highlight.Parent)
+
+			if not entry or broken then
+				if entry then
+					destroyEntry(entry)
+				end
+				tracked[model] = createEntry(model)
+			end
+		end
+
+		for model, entry in pairs(tracked) do
+			if not seen[model] then
+				destroyEntry(entry)
+				tracked[model] = nil
+			end
+		end
+	end
+
+	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+		if not (KillerESP:IsEnabled() and isOnesKiller()) then
+			if next(tracked) ~= nil then
+				clearAll()
+			end
+			return
+		end
+
+		for _, entry in pairs(tracked) do
+			pcall(updateEntry, entry)
+		end
+
+		scanClock += dt
+		if scanClock < SCAN_INTERVAL then
+			return
+		end
+		scanClock = 0
+
+		pcall(scan)
+	end))
+
+	local api = {}
+
+	function api.Unload()
+		clearAll()
+
+		for _, conn in ipairs(connections) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		table.clear(connections)
+	end
+
+	return api
+end)()
+
 -- Azure trap ESP. Azure places two constructs -- "Blossom" (Vine) and "Sow" (GroundBulb).
 -- Each placement spawns an invisible "<player>'s <Type>" model carrying the AzureConstruct
 -- attribute, plus its visible "<Type>Model". Both are highlighted so the traps show through
@@ -2305,15 +2496,32 @@ local AzureTrapESP = (function()
 end)()
 
 -- Tracers. Each one draws a line from the bottom-centre of the screen to its target's
--- projected screen position using the executor's Drawing API (one line per target, reused
--- from a pool). Tracers are independent of the ESP toggles and share the ESP colours.
-local TRACER_DRAWING = type(Drawing) == "table" and type(Drawing.new) == "function"
+-- projected screen position. The lines are Roblox Frames inside a ScreenGui ordered
+-- *below* the WindUI window, so the menu always covers them -- the executor's Drawing API
+-- renders above every Roblox UI, so it cannot be layered underneath.
+local TracerContainer
 
-if not TRACER_DRAWING then
-	warn("[Forsakenium] Drawing API unavailable - tracers will not render")
+local function tracerContainer()
+	if TracerContainer and TracerContainer.Parent then
+		return TracerContainer
+	end
+
+	local core = game:GetService("CoreGui")
+	local windui = core:FindFirstChild("WindUI", true)
+	local order = (windui and windui.DisplayOrder) or 0
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ForsakeniumTracers"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = order - 1
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = (windui and windui.Parent) or core
+
+	TracerContainer = gui
+	return gui
 end
 
-local TRAP_TRACER_COLOR = Color3.fromRGB(191, 255, 191)
 local GENERATOR_TRACER_COLOR = Color3.fromHex("ffcc33")
 
 local function tracerCharacterPosition(model)
@@ -2418,83 +2626,37 @@ local function tracerItems()
 	return out
 end
 
-local function tracerTraps(keyword)
-	local out = {}
-	local map = workspace:FindFirstChild("Map")
-	if not map then
-		return out
-	end
-
-	local containers = {}
-	local ingame = map:FindFirstChild("Ingame")
-	if ingame then
-		table.insert(containers, ingame)
-		local decor = ingame:FindFirstChild("Map")
-		if decor then
-			table.insert(containers, decor)
-		end
-	end
-
-	local lobby = map:FindFirstChild("Lobby")
-	if lobby then
-		table.insert(containers, lobby)
-		local interactive = lobby:FindFirstChild("Interactive")
-		if interactive then
-			table.insert(containers, interactive)
-		end
-	end
-
-	for _, container in ipairs(containers) do
-		for _, model in ipairs(container:GetChildren()) do
-			if model:IsA("Model")
-				and string.find(string.lower(model.Name), keyword, 1, true)
-				and not model:HasTag("SurvivorConstruct")
-				and model:GetAttribute("Team") ~= "Survivors" then
-				local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-				if part then
-					table.insert(out, part.Position)
-				end
-			end
-		end
-	end
-
-	return out
-end
-
 local function makeTracer(opts)
 	local state = { Enabled = false }
-	local lines = {}
+	local frames = {}
 	local connections = {}
 
-	local function lineAt(index)
-		if not TRACER_DRAWING then
-			return nil
-		end
-
-		local line = lines[index]
-		if not line then
-			local ok, created = pcall(function()
-				return Drawing.new("Line")
-			end)
-			if not ok or not created then
+	local function frameAt(index)
+		local frame = frames[index]
+		if not frame then
+			local container = tracerContainer()
+			if not container then
 				return nil
 			end
 
-			line = created
-			line.Thickness = opts.thickness or 2
-			line.Transparency = 1
-			line.Visible = false
-			lines[index] = line
+			frame = Instance.new("Frame")
+			frame.Name = "ForsakeniumTracer"
+			frame.BorderSizePixel = 0
+			frame.AnchorPoint = Vector2.new(0, 0.5)
+			frame.BackgroundColor3 = Color3.new(1, 1, 1)
+			frame.Visible = false
+			frame.Parent = container
+			frames[index] = frame
 		end
 
-		return line
+		return frame
 	end
 
 	local function hideFrom(index)
-		for i = index, #lines do
-			local line = lines[i]
-			if line then
-				line.Visible = false
+		for i = index, #frames do
+			local frame = frames[i]
+			if frame then
+				frame.Visible = false
 			end
 		end
 	end
@@ -2520,18 +2682,22 @@ local function makeTracer(opts)
 			if near then
 				local point = camera:WorldToViewportPoint(position)
 				if point.Z > 0 then
-					local line = lineAt(index)
-					if line then
+					local frame = frameAt(index)
+					if frame then
 						local colour = (type(target) == "table" and target.color) or opts.color
 						if type(colour) == "function" then
 							colour = colour()
 						end
 
-						line.From = origin
-						line.To = Vector2.new(point.X, point.Y)
-						line.Color = colour or Color3.fromRGB(255, 255, 255)
-						line.Transparency = 1
-						line.Visible = true
+						local to = Vector2.new(point.X, point.Y)
+						local delta = to - origin
+						local length = delta.Magnitude
+
+						frame.BackgroundColor3 = colour or Color3.new(1, 1, 1)
+						frame.Position = UDim2.fromOffset(origin.X, origin.Y)
+						frame.Size = UDim2.fromOffset(math.max(length, 1), opts.thickness or 2)
+						frame.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+						frame.Visible = true
 						index += 1
 					end
 				end
@@ -2561,12 +2727,20 @@ local function makeTracer(opts)
 		state.Enabled = false
 		hideFrom(1)
 
-		for _, line in ipairs(lines) do
+		for _, frame in ipairs(frames) do
 			pcall(function()
-				line:Remove()
+				frame:Destroy()
 			end)
 		end
-		table.clear(lines)
+		table.clear(frames)
+
+		local container = TracerContainer
+		if container and container.Parent and #container:GetChildren() == 0 then
+			pcall(function()
+				container:Destroy()
+			end)
+			TracerContainer = nil
+		end
 
 		for _, conn in ipairs(connections) do
 			pcall(function()
@@ -2605,20 +2779,6 @@ local GeneratorTracer = makeTracer({
 local ItemTracer = makeTracer({
 	collect = tracerItems,
 	color = Color3.fromRGB(120, 200, 255),
-})
-
-local TripwireTracer = makeTracer({
-	collect = function()
-		return tracerTraps("tripwire")
-	end,
-	color = TRAP_TRACER_COLOR,
-})
-
-local TripmineTracer = makeTracer({
-	collect = function()
-		return tracerTraps("tripmine")
-	end,
-	color = TRAP_TRACER_COLOR,
 })
 
 function Visuals.Build(Tab, ctx)
@@ -2831,24 +2991,6 @@ function Visuals.Build(Tab, ctx)
 			ItemTracer:SetEnabled(value)
 		end,
 	})
-
-	Tab:Toggle({
-		Title = "Tripwire Tracer",
-		Desc = "Draw tracers to tripwires.",
-		Value = false,
-		Callback = function(value)
-			TripwireTracer:SetEnabled(value)
-		end,
-	})
-
-	Tab:Toggle({
-		Title = "Subspace Tripmine Tracer",
-		Desc = "Draw tracers to subspace tripmines.",
-		Value = false,
-		Callback = function(value)
-			TripmineTracer:SetEnabled(value)
-		end,
-	})
 end
 
 function Visuals.Unload()
@@ -2862,12 +3004,11 @@ function Visuals.Unload()
 	AzureTrapESP.Unload()
 	JohnDoeShadowESP.Unload()
 	CoolkiddMinionESP.Unload()
+	OnesMinionESP.Unload()
 	KillerTracer.Unload()
 	SurvivorTracer.Unload()
 	GeneratorTracer.Unload()
 	ItemTracer.Unload()
-	TripwireTracer.Unload()
-	TripmineTracer.Unload()
 end
 
 return Visuals
