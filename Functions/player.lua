@@ -32,7 +32,7 @@ local GOD = {
 	fakeY = -1000,
 	interval = 0,
 	stillTime = 0,
-	velThreshold = 0.001, -- effectively zero: a resting character reads ~0.0008
+	velThreshold = 0, -- teleport/spoof only while the character is completely stationary
 	stopCooldown = 0,
 	tpPause = 0.25,
 	dropShield = 40,
@@ -73,16 +73,9 @@ local function godGetParts()
 end
 
 local function godIsStill(hum, root)
-	if hum.FloorMaterial == Enum.Material.Air then
-		return false
-	end
-	if hum.MoveDirection.Magnitude > 0.01 then
-		return false
-	end
-	if root.AssemblyLinearVelocity.Magnitude > GOD.velThreshold then
-		return false
-	end
-	return true
+	-- Velocity only: the spoof/teleport fires when the character is completely stationary.
+	-- No floor/input requirement, so standing on a slope or a prop still counts.
+	return root.AssemblyLinearVelocity.Magnitude <= GOD.velThreshold
 end
 
 local function godSendPacket(hum, root)
@@ -273,7 +266,8 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 			local movingInput = hum.MoveDirection.Magnitude > 0.01
 			godMotionCooldown = movingInput and GOD.stopCooldown or (godMotionCooldown - dt)
 
-			if not paused and ch:HasTag("Replicating") and not movingInput and godMotionCooldown <= 0 then
+			-- Gate is purely the velocity check inside godIsStill now.
+			if not paused and ch:HasTag("Replicating") then
 				if godIsStill(hum, root) then
 					godStillFor += dt
 				else
